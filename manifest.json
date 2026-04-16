@@ -1,0 +1,35 @@
+{
+  "manifest_version": 3,
+  "name": "Diggio Agent IA",
+  "version": "1.0.0",
+  "description": "Agente AI che controlla Chrome: naviga, analizza, confronta prezzi e automatizza task con OpenAI, Claude, Groq e altri.",
+  "permissions": [
+    "debugger",
+    "tabs",
+    "tabGroups",
+    "scripting",
+    "storage",
+    "sidePanel",
+    "activeTab",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "background": {
+    "service_worker": "background/worker.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/panel.html"
+  },
+  "action": {
+    "default_title": "Diggio Agent IA",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  }
+}
