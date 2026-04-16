@@ -12,7 +12,11 @@ Descrivi quello che vuoi fare in linguaggio naturale — l'agente naviga siti, c
 
 ## 📸 Screenshot
 
-> *(Aggiungi qui screenshot del pannello in funzione)*
+<div align="center">
+  <img src="schermate/slide1.png" width="800" alt="Home Agent" />
+  <br/><br/>
+  <img src="schermate/slide2.png" width="800" alt="Funzioni dell'Agente" />
+</div>
 
 ---
 
