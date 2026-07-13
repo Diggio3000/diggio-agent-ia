@@ -214,9 +214,13 @@ select option   { color: var(--text-main); background: var(--bg-surface); }
   background: var(--error-bg); border-left: 3px solid var(--error); 
   color: #ffb3b3; 
 }
-.message.done { 
-  background: linear-gradient(to right, rgba(16, 185, 129, 0.2), transparent); 
+.message.done {
+  background: linear-gradient(to right, rgba(16, 185, 129, 0.2), transparent);
   border-left: 3px solid var(--success); font-weight: 600; color: #fff;
+}
+.message.ask_user {
+  background: linear-gradient(to right, rgba(251, 191, 36, 0.15), transparent);
+  border-left: 3px solid #fbbf24; color: #fde68a; font-weight: 600;
 }
 .message.info { 
   background: var(--bg-surface); color: var(--text-muted); font-size: 12px; 

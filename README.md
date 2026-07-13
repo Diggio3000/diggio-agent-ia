@@ -22,12 +22,17 @@ Descrivi quello che vuoi fare in linguaggio naturale — l'agente naviga siti, c
 
 ## ✨ Funzionalità principali
 
-- 🧠 **Loop ReAct** fino a 30 passi — Ragionamento → Azione → Osservazione
+- 🧠 **Loop ReAct** fino a 40 passi — Ragionamento → Azione → Osservazione
+- 💬 **Memoria conversazione** — l'agente ricorda i task precedenti della stessa chat: fai domande di follow-up senza ripetere nulla
+- 📚 **Apprendimento siti** — l'agente impara come si usa ogni sito (selettori, trucchi, pattern URL) e riusa gli appunti alle visite successive
+- ❓ **Domande interattive** — con `ask_user` l'agente ti chiede conferme e chiarimenti a metà task
+- 👁️ **Verifica visiva** — screenshot al modello dopo ogni click/navigazione, con controllo che l'azione abbia avuto l'effetto atteso
 - 🔑 **Porta la tua API Key** — nessun lock-in, scegli tu il provider
 - 🛠️ **20+ azioni** per controllare il browser (naviga, clicca, digita, scrolla, legge, esegue JS…)
 - 🤖 **Automazioni programmate** con Chrome Alarms — girano in background anche a pannello chiuso
 - 🖼️ **Vision** — allega immagini come riferimento visivo per confronti prodotti
 - 📈 **Analisi SEO** completa con punteggio 0-100
+- 📣 **Analisi Google Ads** — campagne, keyword, termini di ricerca e annunci; correzioni sempre confermate dall'utente (protezione budget)
 - 🛡️ **Controllo sicurezza sito** — VirusTotal, SSL, header, scansione codice sorgente
 - 🕵️ **Verifica truffa** — 15 indicatori di frode + WHOIS + Trustpilot
 - 💰 **Scraper prezzi** con modalità loop/monitoraggio
@@ -48,8 +53,10 @@ Descrivi quello che vuoi fare in linguaggio naturale — l'agente naviga siti, c
 | **Groq** | `api.groq.com` | Llama 3.3, Mixtral, Gemma — gratis con limiti |
 | **OpenRouter** | `openrouter.ai` | Centinaia di modelli con una sola chiave |
 | **Perplexity AI** | `api.perplexity.ai` | Sonar Pro, Sonar Reasoning |
-| **Ollama** | `localhost:11434` | Qualsiasi modello locale — 100% privato |
-| **Custom** | Qualsiasi URL | Open WebUI, LM Studio, llama.cpp… |
+| **Ollama** | `localhost:11434` | Qualsiasi modello locale — 100% privato (avvia con `OLLAMA_ORIGINS=chrome-extension://*`) |
+| **Ollama.com** | `ollama.com/v1` | Modelli cloud di Ollama con API Key |
+| **LM Studio** | `localhost:1234` | Modelli locali via LM Studio (server attivo + CORS) |
+| **Custom** | Qualsiasi URL | Open WebUI, llama.cpp… |
 
 I modelli vengono **caricati automaticamente** dall'endpoint premendo 🔄 — nessuna configurazione manuale.
 
@@ -164,6 +171,7 @@ Per bug e suggerimenti: apri una [Issue](https://github.com/Diggio3000/diggio-ag
 
 **Antonio Di Giorgio** — per tutti Diggio3000
 
+🌐 [www.diggio3000.it](https://www.diggio3000.it)
 📧 [diggiotelefonia@gmail.com](mailto:diggiotelefonia@gmail.com)
 
 ---

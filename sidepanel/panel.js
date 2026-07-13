@@ -14,6 +14,7 @@ let currentMode   = 'auto';       // 'auto' | 'ask_first'
 let selectedTabId = null;
 let attachedImage = null;         // base64 data URL
 let currentSession = [];          // messaggi sessione corrente (per salvataggio)
+let awaitingReply  = false;       // true quando l'agente ha fatto una domanda (ask_user)
 
 // Modelli che supportano analisi immagini (vision/multimodal)
 const VISION_MODELS = [
@@ -41,13 +42,15 @@ function updateVisionWarning() {
 
 // Preset endpoint per provider
 const PROVIDER_PRESETS = {
-  openai:      'https://api.openai.com/v1/chat/completions',
-  anthropic:   'https://api.anthropic.com/v1/messages',
-  groq:        'https://api.groq.com/openai/v1/chat/completions',
-  openrouter:  'https://openrouter.ai/api/v1/chat/completions',
-  perplexity:  'https://api.perplexity.ai/chat/completions',
-  ollama:      'http://localhost:11434/v1/chat/completions',
-  custom:      ''
+  openai:       'https://api.openai.com/v1/chat/completions',
+  anthropic:    'https://api.anthropic.com/v1/messages',
+  groq:         'https://api.groq.com/openai/v1/chat/completions',
+  openrouter:   'https://openrouter.ai/api/v1/chat/completions',
+  perplexity:   'https://api.perplexity.ai/chat/completions',
+  ollama:       'http://localhost:11434/v1/chat/completions',
+  ollama_cloud: 'https://ollama.com/v1/chat/completions',
+  lmstudio:     'http://localhost:1234/v1/chat/completions',
+  custom:       ''
 };
 
 // ── Impostazioni ─────────────────────────────────────────────
@@ -56,10 +59,11 @@ $('btnSettings').addEventListener('click', () => {
 });
 
 // Carica impostazioni salvate
-chrome.storage.sync.get(['apiKey', 'model', 'apiEndpoint', 'provider'], ({ apiKey, model, apiEndpoint, provider }) => {
+chrome.storage.sync.get(['apiKey', 'model', 'apiEndpoint', 'provider', 'nativeTools'], ({ apiKey, model, apiEndpoint, provider, nativeTools }) => {
   if (apiKey)      $('apiKey').value      = apiKey;
   if (model)       $('modelManual').value = model;
   if (apiEndpoint) $('apiEndpoint').value = apiEndpoint;
+  $('nativeToolsCheck').checked = nativeTools === true;
   if (provider)    $('providerSelect').value = provider;
   else             $('providerSelect').value = 'openai';
   // Se non c'è endpoint salvato, usa il preset del provider selezionato
@@ -137,9 +141,22 @@ $('btnLoadModels').addEventListener('click', async () => {
     populateModelSelect(selectEl, models);
     statusEl.textContent = `✅ ${models.length} modelli caricati`;
   } catch (e) {
-    statusEl.textContent = `❌ ${e.message}`;
+    statusEl.textContent = `❌ ${hintForFetchError(e, endpoint)}`;
   }
 });
+
+// Suggerimenti mirati per gli errori più comuni con endpoint locali
+function hintForFetchError(e, endpoint) {
+  const msg = e.message || String(e);
+  const isLocal = endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
+  if (isLocal && endpoint.includes('11434')) {
+    return `${msg} — Ollama è avviato? Se sì, riavvialo con la variabile OLLAMA_ORIGINS=chrome-extension://* (oppure "*") per consentire l'accesso all'estensione`;
+  }
+  if (isLocal && endpoint.includes('1234')) {
+    return `${msg} — LM Studio è aperto con il server attivo? (Developer → Start Server, abilita CORS)`;
+  }
+  return msg;
+}
 
 function populateModelSelect(selectEl, models) {
   selectEl.innerHTML = models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
@@ -165,7 +182,8 @@ $('btnSaveSettings').addEventListener('click', async () => {
   if (!model)       { $('testResult').textContent = '❌ Inserisci il nome del modello!'; return; }
   if (!apiEndpoint) { $('testResult').textContent = '❌ Inserisci l\'endpoint API!'; return; }
 
-  await chrome.storage.sync.set({ apiKey, model, apiEndpoint, provider });
+  const nativeTools = $('nativeToolsCheck').checked;
+  await chrome.storage.sync.set({ apiKey, model, apiEndpoint, provider, nativeTools });
   $('testResult').textContent = '⏳ Test in corso...';
 
   const controller = new AbortController();
@@ -283,7 +301,7 @@ $('btnScreenshot').addEventListener('click', () => {
   chrome.runtime.sendMessage({ type:'SCREENSHOT' });
 });
 
-// ── Clear chat ────────────────────────────────────────────────
+// ── Nuova conversazione (pulisce chat + memoria dell'agente) ──
 $('btnClearChat').addEventListener('click', () => {
   if (agentRunning) return;
   // Salva sessione corrente prima di cancellare (se non vuota)
@@ -292,7 +310,9 @@ $('btnClearChat').addEventListener('click', () => {
   currentSession = [];
   attachedImage  = null;
   $('attachedImagePreview').classList.add('hidden');
-  addMessage('💬 Chat cancellata', 'info');
+  // Azzera anche la memoria persistente del worker
+  chrome.runtime.sendMessage({ type: 'NEW_CONVERSATION' });
+  addMessage('🆕 Nuova conversazione — chat e memoria dell\'agente azzerate', 'info');
 });
 
 // ── Cronologia ────────────────────────────────────────────────
@@ -411,7 +431,17 @@ $('btnSkip').addEventListener('click', () => {
 $('btnStart').addEventListener('click', async () => {
   const task = $('taskInput').value.trim();
   if (!task) return;
-  const { apiKey, model, apiEndpoint } = await chrome.storage.sync.get(['apiKey','model','apiEndpoint']);
+
+  // Se l'agente ha fatto una domanda (ask_user), questo testo è la RISPOSTA
+  if (awaitingReply) {
+    addMessage(task, 'user');
+    $('taskInput').value = '';
+    setAwaitingReply(false);
+    chrome.runtime.sendMessage({ type: 'USER_REPLY', text: task });
+    return;
+  }
+
+  const { apiKey, model, apiEndpoint, nativeTools } = await chrome.storage.sync.get(['apiKey','model','apiEndpoint','nativeTools']);
   if (!apiKey) {
     addMessage('❌ Configura la API Key nelle impostazioni ⚙️', 'error');
     $('settingsPanel').classList.remove('hidden');
@@ -452,6 +482,7 @@ $('btnStart').addEventListener('click', async () => {
     apiKey,
     model:          model || 'gpt-4o-mini',
     endpoint:       apiEndpoint || null,
+    nativeTools:    nativeTools === true,
     tabId:          selectedTabId,
     mode:           currentMode,
     imageData:      attachedImage,
@@ -491,16 +522,39 @@ chrome.runtime.onMessage.addListener((msg) => {
 
   addMessage(msg.text, msg.updateType);
 
+  // L'agente ha fatto una domanda: sblocca l'input per la risposta
+  if (msg.updateType === 'ask_user') {
+    setAwaitingReply(true);
+    return;
+  }
+
   if (msg.updateType === 'save_report') {
     downloadReport(currentSession);
     return;
   }
 
   if (msg.updateType === 'done' || msg.text?.includes('Sessione terminata')) {
+    setAwaitingReply(false);
     setRunning(false);
     saveSession();
   }
 });
+
+// Modalità "risposta all'agente": input abilitato anche mentre l'agente gira
+function setAwaitingReply(active) {
+  awaitingReply = active;
+  const btn = $('btnStart');
+  if (active) {
+    btn.disabled    = false;
+    btn.textContent = '↩ Rispondi';
+    $('taskInput').placeholder = 'Scrivi la risposta per l\'agente...';
+    $('taskInput').focus();
+  } else {
+    btn.textContent = '▶ Avvia';
+    btn.disabled    = agentRunning;
+    $('taskInput').placeholder = 'Descrivi cosa vuoi fare...';
+  }
+}
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -628,7 +682,7 @@ function downloadReport(messages) {
     <p>${esc(title.substring(0, 100))} &nbsp;·&nbsp; ${date}</p>
   </div>
   ${rows}
-  <div class="footer">Generato da Diggio Browser Agent · ${date}</div>
+  <div class="footer">Generato da Diggio Agent IA · ${date} · <a href="https://www.diggio3000.it" style="color:#818cf8">www.diggio3000.it</a></div>
 </body>
 </html>`;
 
@@ -812,7 +866,50 @@ async function renderTemplates(filter = '') {
 // ── Strumenti (tools panel) ───────────────────────────────────
 $('btnTools').addEventListener('click', () => {
   toggleDrawer('toolsPanel');
-  if (!$('toolsPanel').classList.contains('hidden')) loadFormFillerData();
+  if (!$('toolsPanel').classList.contains('hidden')) {
+    loadFormFillerData();
+    renderSiteKnowledge();
+  }
+});
+
+// — Memoria Siti (apprendimento) —
+async function renderSiteKnowledge() {
+  const list = $('siteKnowledgeList');
+  if (!list) return;
+  let knowledge = {};
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'GET_SITE_KNOWLEDGE' });
+    knowledge = res?.knowledge ?? {};
+  } catch {}
+  const domains = Object.keys(knowledge).sort();
+  list.innerHTML = '';
+  if (domains.length === 0) {
+    list.innerHTML = '<div class="no-history">Nessun appunto ancora — l\'agente impara mentre naviga</div>';
+    return;
+  }
+  domains.forEach(d => {
+    const entry = knowledge[d];
+    const notes = entry?.notes ?? [];
+    const div = document.createElement('div');
+    div.className = 'history-item';
+    div.innerHTML = `
+      <div class="h-title">🌐 ${esc(d)} <span style="color:#94a3b8;font-weight:400">(${notes.length} appunt${notes.length === 1 ? 'o' : 'i'})</span></div>
+      <div class="h-date" style="white-space:pre-line">${esc(notes.map(n => '• ' + n).join('\n'))}</div>
+      <button class="h-del" title="Dimentica questo sito">🗑</button>
+    `;
+    div.querySelector('.h-del').addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await chrome.runtime.sendMessage({ type: 'DELETE_SITE_KNOWLEDGE', domain: d });
+      renderSiteKnowledge();
+    });
+    list.appendChild(div);
+  });
+}
+
+$('btnClearKnowledge').addEventListener('click', async () => {
+  if (!confirm('Dimenticare tutti gli appunti appresi su tutti i siti?')) return;
+  await chrome.runtime.sendMessage({ type: 'DELETE_SITE_KNOWLEDGE' });
+  renderSiteKnowledge();
 });
 
 // — Scraper Prezzi —
@@ -964,12 +1061,73 @@ Torna su ${url} e usa execute_js per estrarre:
 - Script con src esterni (potenzialmente bloccanti)
 - Meta viewport, og:*, twitter:*, JSON-LD schema
 
-STEP 4 — Genera il report finale con queste sezioni:
+STEP 4 — DIAGNOSTICA TECNICA (console e rete):
+- read_console() → errori JavaScript e warning della pagina
+- read_network() → script esterni caricati (quali tecnologie/tracker usa il sito) e risorse che falliscono (404/500)
+Nota: console e rete si registrano da quando sei connesso — hai già navigato quindi i dati ci sono.
+
+STEP 5 — Genera il report finale con queste sezioni:
 ${tasks}
 
 Per ogni punto indica: ✅ OK / ⚠️ Da migliorare / ❌ Problema critico
 Concludi con un punteggio SEO stimato (0-100) e le 5 azioni prioritarie da fare subito.
 Scatta screenshot della homepage e del report finale.`;
+
+  $('taskInput').value = prompt;
+  toggleDrawer('toolsPanel');
+  $('taskInput').focus();
+});
+
+// — Analisi Google Ads —
+$('btnAdsGenera').addEventListener('click', () => {
+  const scope = $('adsScope').value;
+  const fix   = $('adsFix').checked;
+
+  const scopeSteps = {
+    campaigns: `STEP — CAMPAGNE:
+- navigate("https://ads.google.com/aw/campaigns") → wait(4) → screenshot
+- Estrai la tabella campagne con execute_js (righe con nome, stato, budget, impressioni, click, CTR, CPC, conversioni, costo)
+- Segnala: campagne "Limitata dal budget", CTR sotto media, costo/conversione alto`,
+    keywords: `STEP — PAROLE CHIAVE:
+- Naviga nella sezione "Parole chiave" → wait(4) → screenshot
+- Estrai keyword con punteggio di qualità e CPC usando execute_js
+- Poi apri "Termini di ricerca" e individua query irrilevanti che consumano budget
+- Proponi le parole chiave negative da aggiungere`,
+    ads: `STEP — ANNUNCI:
+- Naviga nella sezione "Annunci" → wait(4) → screenshot
+- Verifica stato di ogni annuncio: attivo, in verifica, rifiutato (e motivo)
+- Controlla efficacia annuncio ("Scarsa", "Media", "Ottima") dove visibile`,
+    full: `STEP 1 — PANORAMICA: navigate("https://ads.google.com/aw/overview") → wait(4) → screenshot
+STEP 2 — CAMPAGNE: navigate("https://ads.google.com/aw/campaigns") → wait(4) → estrai la tabella con execute_js
+  (nome, stato, budget/giorno, impressioni, click, CTR, CPC medio, conversioni, costo)
+STEP 3 — PAROLE CHIAVE: sezione "Parole chiave" → punteggio di qualità e CPC per keyword
+STEP 4 — TERMINI DI RICERCA: individua query irrilevanti che consumano budget
+STEP 5 — ANNUNCI: stato, annunci rifiutati e motivo`
+  };
+
+  const fixPart = fix ? `
+
+DOPO L'ANALISI — CORREZIONI (una alla volta):
+Per ogni problema trovato, in ordine di impatto:
+1. Spiega con ask_user() la correzione proposta (cosa, dove, impatto atteso) e chiedi conferma
+2. Se confermo: applica la modifica e scatta screenshot di verifica
+3. Se rifiuto: passa alla correzione successiva
+Correzioni tipiche: aggiungere parole chiave negative, mettere in pausa keyword con quality score
+molto basso, segnalare campagne con budget da rivedere (NON cambiare mai i budget senza il mio ok esplicito).` : `
+
+NON applicare nessuna modifica — solo analisi e suggerimenti.`;
+
+  const prompt =
+`Analizza il mio account Google Ads (sono già loggato su ads.google.com).
+⚠️ L'interfaccia è una SPA lenta: dopo ogni navigazione usa wait(4) prima di leggere.
+
+${scopeSteps[scope] ?? scopeSteps.full}
+
+REPORT FINALE:
+- 📊 Tabella riassuntiva per campagna: stato, budget, CTR, CPC, conversioni, costo
+- ⚠️ Problemi trovati in ordine di impatto economico
+- 💡 Per ogni problema: suggerimento concreto e impatto stimato
+- 🏆 Le 3 azioni prioritarie da fare subito${fixPart}`;
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
@@ -1424,6 +1582,6 @@ function formatDays(days) {
 $('taskInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault();
-    if (!agentRunning) $('btnStart').click();
+    if (!agentRunning || awaitingReply) $('btnStart').click();
   }
 });

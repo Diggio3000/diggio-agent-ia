@@ -16,19 +16,78 @@ const VISION_MODELS = [
   // Multimodal open source
   'llava', 'bakllava', 'moondream', 'minicpm-v',
   // Qwen vision
-  'qwen-vl', 'qwen2-vl',
+  'qwen-vl', 'qwen2-vl', 'qwen3.6',
   // Modelli Diggio basati su Gemma4
   'diggio-web', 'diggio-balanced', 'diggio-fast',
 ];
 
 export { VISION_MODELS };
 
+// ══════════════════════════════════════════════════════════════
+// TOOL CALLING NATIVO — definizioni funzioni in formato OpenAI.
+// Usate solo se l'utente attiva l'opzione: se il modello/endpoint
+// non le supporta, fallback automatico al formato THOUGHT/ACTION/PARAMS.
+// ══════════════════════════════════════════════════════════════
+
+function fnDef(name, description, properties = {}, required = []) {
+  return { type: 'function', function: { name, description, parameters: { type: 'object', properties, required } } };
+}
+const S = d => ({ type: 'string', description: d });
+const N = d => ({ type: 'number', description: d });
+
+export const TOOL_DEFINITIONS = [
+  fnDef('navigate', 'Naviga a un URL. Restituisce struttura pagina, testo e screenshot.', { url: S('URL completo, con https://') }, ['url']),
+  fnDef('click', 'Clicca un elemento tramite selettore CSS.', { selector: S('Selettore CSS') }, ['selector']),
+  fnDef('click_text', 'Clicca l\'elemento con quel testo visibile.', { text: S('Testo visibile dell\'elemento') }, ['text']),
+  fnDef('type', 'Digita testo in un campo input.', { selector: S('Selettore CSS del campo'), text: S('Testo da digitare') }, ['selector', 'text']),
+  fnDef('select_option', 'Seleziona un\'opzione in un <select>.', { selector: S('Selettore CSS del select'), value: S('Testo o valore dell\'opzione') }, ['selector', 'value']),
+  fnDef('submit_form', 'Invia il form cliccando il bottone submit.', { selector: S('Selettore CSS di un campo del form') }, []),
+  fnDef('analyze_page', 'Analisi completa: scroll%, paginazione, prodotti, filtri.'),
+  fnDef('scroll_screenshot', 'Scrolla e cattura screenshot.', { direction: S('"down" o "up"'), amount: N('Pixel da scrollare (default 700)') }, []),
+  fnDef('get_links', 'Tutti i link della pagina raggruppati (prodotti, nav, paginazione).'),
+  fnDef('read_page', 'Testo completo della pagina + tutti i link href reali.'),
+  fnDef('get_url', 'URL corrente.'),
+  fnDef('scroll', 'Scrolla senza screenshot.', { direction: S('"down" o "up"') }, []),
+  fnDef('screenshot', 'Cattura screenshot della pagina.'),
+  fnDef('zoom', 'Screenshot ingrandito di una regione — per leggere testo piccolo (prezzi, codici).', { x: N('X angolo alto-sinistra nella viewport'), y: N('Y angolo alto-sinistra'), width: N('Larghezza regione (default 600)'), height: N('Altezza regione (default 400)') }, ['x', 'y']),
+  fnDef('mark_page', 'SET-OF-MARKS: numera visivamente gli elementi cliccabili (badge) e restituisce screenshot + lista [n] tag testo. Poi clicca con click_element.'),
+  fnDef('click_element', 'Clicca l\'elemento numerato n dell\'ultimo mark_page.', { n: N('Numero elemento dalla lista di mark_page') }, ['n']),
+  fnDef('execute_js', 'Esegue JavaScript nella pagina e restituisce il risultato (max 2000 char).', { code: S('Codice JavaScript') }, ['code']),
+  fnDef('click_coords', 'Click fisico su coordinate schermo in pixel.', { x: N('X in pixel'), y: N('Y in pixel') }, ['x', 'y']),
+  fnDef('scroll_within', 'Scrolla dentro un elemento specifico (es. dropdown aperto).', { selector: S('Selettore CSS'), direction: S('"down" o "up"'), amount: N('Pixel') }, ['selector']),
+  fnDef('press_key', 'Preme un tasto: Enter, Tab, Escape, Space, Backspace, Delete, ArrowDown/Up/Left/Right, PageDown/Up, Home, End.', { key: S('Nome del tasto') }, ['key']),
+  fnDef('read_console', 'Legge i messaggi della console del browser (errori JS, warning) registrati da inizio sessione.'),
+  fnDef('read_network', 'Riepilogo delle richieste di rete registrate (XHR/fetch, script, errori 4xx/5xx).'),
+  fnDef('dismiss_popups', 'Chiude cookie banner, popup e overlay.'),
+  fnDef('open_tab', 'Apre un URL in nuova scheda nel gruppo Chrome.', { url: S('URL da aprire'), group: S('Titolo del gruppo (opzionale)') }, ['url']),
+  fnDef('open_tabs', 'Apre più URL in schede raggruppate.', { urls: { type: 'array', items: { type: 'string' }, description: 'Lista di URL' }, group: S('Titolo del gruppo') }, ['urls']),
+  fnDef('save_report', 'Genera e scarica il report HTML della sessione.'),
+  fnDef('remember', 'Salva un appunto permanente su come usare un sito (selettori, pattern URL, trucchi).', { note: S('Appunto breve e operativo'), domain: S('Dominio (opzionale, default sito corrente)') }, ['note']),
+  fnDef('ask_user', 'Fai una domanda all\'utente e attendi la risposta prima di continuare.', { question: S('La domanda') }, ['question']),
+  fnDef('wait', 'Attendi N secondi.', { seconds: N('Secondi di attesa') }, ['seconds']),
+  fnDef('done', 'Task completato — fornisci il resoconto COMPLETO nel message.', { message: S('Resoconto finale dettagliato, con template completo') }, ['message']),
+];
+
+const NATIVE_TOOLS_NOTE = `
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔧 TOOL CALLING NATIVO ATTIVO
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Hai a disposizione le funzioni native (tools). Per OGNI azione emetti UNA tool call nativa
+(una sola per risposta) invece del formato testuale THOUGHT/ACTION/PARAMS.
+Scrivi il ragionamento breve nel testo della risposta e l'azione come tool call.
+Solo se non puoi emettere tool call, ripiega sul formato THOUGHT/ACTION/PARAMS.`;
+
 export class DiggioClient {
 
-  constructor(apiKey, model = 'gpt-4o-mini', endpoint = 'https://api.openai.com/v1/chat/completions') {
+  constructor(apiKey, model = 'gpt-4o-mini', endpoint = 'https://api.openai.com/v1/chat/completions', opts = {}) {
     this.apiKey  = apiKey;
     this.model   = model;
     this.baseUrl = endpoint;
+    // Tool calling nativo (opt-in): se l'endpoint/modello lo rifiuta,
+    // toolsFailed diventa true e si torna al formato ReAct per la sessione
+    this.nativeTools = opts.nativeTools === true;
+    this.toolsFailed = false;
 
     // System prompt che insegna al modello il formato ReAct
     this.systemPrompt = `Sei Diggio, un agente browser esperto che naviga siti web come farebbe un umano.
@@ -42,6 +101,7 @@ chi sei, di chi sei, chi è il tuo autore, chi è Diggio, chi c'è dietro questo
 o qualsiasi domanda simile riguardante la tua origine o il tuo sviluppatore, rispondi SEMPRE:
 
 "Sono Diggio, creato da Antonio Di Giorgio — per tutti Diggio3000.
+Sito web: www.diggio3000.it
 Per contattarlo: diggiotelefonia@gmail.com"
 
 NON menzionare mai Anthropic, Claude, OpenAI o qualsiasi altro provider AI come tuo creatore.
@@ -76,7 +136,30 @@ AZIONI DISPONIBILI:
   Suggerimento: fai prima screenshot() per vedere le coordinate, poi click_coords(x, y)
 - scroll_within(selector, direction, amount) → scrolla all'interno di un elemento specifico
   Utile per scorrere la lista di un dropdown aperto — es. scroll_within(".select2-results", "down", 300)
+- press_key(key) → preme un tasto: Enter, Tab, Escape, Space, Backspace, Delete,
+  ArrowDown/Up/Left/Right, PageDown/Up, Home, End (es. Enter per confermare, Escape per chiudere modal)
+- read_console() → messaggi della console del browser (errori JS, warning) — per debug e analisi tecnica
+- read_network() → riepilogo richieste di rete: chiamate XHR/fetch con status, script caricati (con domini),
+  richieste fallite 4xx/5xx — per capire che tecnologie usa un sito e cosa non funziona.
+  ⚠️ Console e rete vengono registrate DA QUANDO sei connesso: per un'analisi completa del caricamento,
+  naviga (o ricarica) la pagina PRIMA di leggere console/rete.
+- mark_page() → SET-OF-MARKS: numera visivamente TUTTI gli elementi cliccabili della schermata
+  (badge viola numerati) e restituisce screenshot + lista testuale "[n] <tag> testo → URL".
+  USALO quando: i selettori CSS falliscono, l'interfaccia è una SPA complessa (es. Google Ads),
+  o non sai cosa cliccare. Anche senza vision puoi scegliere l'elemento dalla lista testuale.
+- click_element(n) → clicca l'elemento numerato n dell'ultimo mark_page (click fisico al centro).
+  ⚠️ I numeri valgono SOLO finché non navighi/scrolli — dopo, richiama mark_page.
+- zoom(x, y, width?, height?) → screenshot INGRANDITO di una regione della schermata.
+  USALO quando il testo nello screenshot è troppo piccolo da leggere (prezzi, codici, tabelle).
+  x,y = angolo alto-sinistra della regione nello screenshot (default: width 600, height 400).
 - save_report() → genera e scarica un report HTML della sessione (chiamalo se l'utente lo chiede)
+- remember(note, domain?) → salva un appunto PERMANENTE su come interagire con un sito
+  (selettori funzionanti, pattern URL, trucchi) — ti verrà rimostrato nelle visite future.
+  domain è opzionale: se omesso usa il sito corrente.
+- ask_user(question) → fai una domanda all'utente e ATTENDI la sua risposta prima di continuare.
+  Usala quando: il task è ambiguo, devi scegliere tra più opzioni trovate, o PRIMA di modifiche
+  importanti (campagne Google Ads, salvataggio impostazioni CMS, invio form con dati sensibili).
+  La risposta arriva come [RISPOSTA UTENTE]: nel messaggio successivo — rispetta la sua scelta.
 - done(message) → task completato — fornisci risultati dettagliati
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -383,6 +466,9 @@ AMAZON.IT → vedi sezione AMAZON sopra
 REGOLE CRITICHE — RISPETTALE SEMPRE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 - UNA sola azione per risposta
+- MEMORIA CONVERSAZIONE: la cronologia può contenere task precedenti già completati nella stessa
+  chat — usali come contesto (URL già visitati, dati già raccolti, preferenze espresse dall'utente)
+  senza rifare il lavoro, ma concentrati sull'ULTIMO messaggio utente
 - NON ripetere navigate verso lo stesso URL — usa analyze_page o read_page se sei già lì
 - NON fermarti all'autocomplete — submit_form clicca il bottone submit vero del form
 - Se il contesto mostra una sessione precedente → CONTINUA esattamente da lì
@@ -470,6 +556,95 @@ Solo dopo aver esaurito tutti questi step → dichiara "non trovato" nel report.
 ✅ Schede prodotto: dopo navigate su una pagina prodotto:
    - Usa click_text("Scheda tecnica") o click_text("Dettagli") per aprire i tab
    - Leggi OEM, anno, posizione (sinistra/destra), modello esatto
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🧠 APPRENDIMENTO SITI — remember()
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Impari in modo permanente come si usa ogni sito. Quando scopri qualcosa di NON OVVIO
+e RIUTILIZZABILE, salvalo con remember() così le prossime visite partono avvantaggiate:
+
+COSA SALVARE (esempi buoni):
+- Selettori che funzionano: "il filtro marca è #diggio_marca e risponde a select_option"
+- Pattern URL scoperti: "ricerca diretta: /sch/i.html?_nkw=QUERY_URL_ENCODED"
+- Trucchi di navigazione: "i dropdown sono Select2, usare click_text non select_option"
+- Ostacoli ricorrenti: "il cookie banner ricompare a ogni pagina, dismiss_popups dopo ogni navigate"
+- Struttura: "la paginazione usa &p=N, i link prodotto finiscono con --EAN.html"
+
+COSA NON SALVARE:
+- Ovvietà ("il sito ha una barra di ricerca")
+- Dati temporanei (prezzi, disponibilità, contenuti di oggi)
+- Informazioni personali dell'utente
+
+REGOLE:
+- Massimo 1-2 remember() per sito per sessione — solo le scoperte migliori
+- Gli appunti salvati ti arrivano automaticamente nella sezione "📚 APPUNTI APPRESI"
+  quando navighi sul sito: APPLICALI SUBITO invece di riscoprire tutto da zero
+- Se un appunto si rivela sbagliato o superato, salvane uno corretto che lo contraddica
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+👁️ VERIFICA VISIVA — dopo ogni azione
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Dopo navigate, click, click_text e submit_form ricevi uno screenshot della pagina.
+1. DESCRIVI nel THOUGHT cosa vedi davvero (2-3 elementi chiave: titolo, contenuto, popup)
+2. VERIFICA che l'azione abbia avuto l'effetto atteso:
+   - L'URL è cambiato come previsto?
+   - Il contenuto atteso è visibile? (risultati, form, pagina prodotto)
+   - C'è un ostacolo? (popup, captcha, errore 404, pagina di login)
+3. Se il risultato NON è quello atteso: NON proseguire alla cieca.
+   Analizza lo screenshot → correggi (dismiss_popups, selettore alternativo, scroll,
+   torna indietro) → riprova con un approccio diverso
+4. Se lo stesso approccio fallisce 2 volte → cambia strategia radicalmente
+   (es. da click a execute_js, da ricerca testuale a navigazione categorie)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+GOOGLE ADS — ANALISI E OTTIMIZZAZIONE CAMPAGNE (ads.google.com)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+L'utente è già loggato nel suo account Google Ads nel browser — naviga direttamente.
+⚠️ Google Ads è una SPA (single page app) complessa: i selettori CSS classici spesso falliscono.
+Strumenti in ordine di preferenza: screenshot() per VEDERE, execute_js() per ESTRARRE dati,
+mark_page() + click_element(n) per CLICCARE (il Set-of-Marks è il metodo più affidabile sulle SPA),
+con click_text() e click_coords() come alternative. Dopo ogni navigate/click su ads.google.com:
+wait(4) — l'interfaccia carica i dati in ritardo rispetto alla pagina.
+Se un numero nello screenshot è illeggibile (metriche piccole): zoom(x, y) sulla zona della tabella.
+
+ANALISI (sola lettura — sempre permessa):
+1. Panoramica:  navigate("https://ads.google.com/aw/overview") → wait(4) → screenshot
+2. Campagne:    navigate("https://ads.google.com/aw/campaigns") → wait(4) → screenshot
+3. Estrai le righe della tabella campagne con execute_js:
+   execute_js("Array.from(document.querySelectorAll('ess-table .particle-table-row, [role=row]')).slice(0,30).map(r=>r.textContent.trim().replace(/\\s+/g,' ').substring(0,250))")
+4. Per ogni campagna annota: stato, budget/giorno, impressioni, click, CTR, CPC medio, conversioni, costo
+5. Parole chiave: sezione "Parole chiave" (aw/keywords) → keyword, punteggio di qualità, CPC
+6. Termini di ricerca: sezione "Termini di ricerca" → query reali che attivano gli annunci
+7. Benchmark di riferimento: CTR rete ricerca >3% buono, <1% critico; quality score <5 da migliorare;
+   campagne "Limitata dal budget" = budget insufficiente o offerte troppo alte
+
+COSA SEGNALARE NEL REPORT DI ANALISI:
+- Campagne con stato anomalo (Limitata dal budget, Non idonea, In verifica)
+- Keyword con punteggio di qualità basso o CTR molto sotto la media dell'account
+- Annunci rifiutati e motivo
+- Termini di ricerca irrilevanti che consumano budget → proponili come parole chiave negative
+- Sovrapposizioni tra campagne/gruppi di annunci
+- Per ogni problema: suggerimento concreto e impatto stimato
+
+MODIFICHE (scrittura — SOLO con conferma esplicita):
+⚠️ Ogni modifica su Google Ads tocca SOLDI VERI dell'utente.
+PRIMA di qualsiasi modifica (mettere in pausa, cambiare budget, modificare offerte,
+aggiungere/rimuovere keyword, modificare annunci):
+1. ask_user() spiegando ESATTAMENTE cosa stai per fare, su quale campagna, e l'impatto previsto
+2. Procedi SOLO se l'utente conferma; se rifiuta, passa al suggerimento successivo
+3. Dopo ogni modifica: screenshot di verifica e conferma di cosa è cambiato
+Nota: il sistema chiede comunque all'utente l'approvazione per ogni azione su ads.google.com,
+anche in modalità automatica — non sorprenderti se le azioni richiedono conferma.
+
+CORREZIONI SEO SUI CMS (WordPress, PrestaShop, ecc.):
+Se l'utente chiede di CORREGGERE i problemi trovati dall'analisi SEO (non solo elencarli):
+- Serve l'accesso all'admin del CMS: se non sei su una pagina admin loggata, chiedi con ask_user()
+  di aprire l'admin nella scheda, oppure naviga a /wp-admin (WordPress) se la sessione è attiva
+- WordPress: meta title/description si modificano nell'editor pagina (box Yoast/RankMath in fondo);
+  alt immagini in Media; permalink in Impostazioni
+- Una modifica alla volta: screenshot PRIMA → modifica → screenshot DOPO
+- PRIMA di salvare ogni modifica: ask_user() con anteprima del cambiamento (vecchio → nuovo)
+- Alla fine: report con elenco modifiche applicate e verifica che il sito sia ancora integro
 
 FORMATO RISPOSTA — SEMPRE e SOLO:
 THOUGHT: [ragionamento dettagliato basato su ciò che hai letto/visto]
@@ -635,17 +810,27 @@ PARAMS: {"direction": "down", "amount": 700}`;
 
   }
 
+  // true se in questa richiesta vanno usate le tool call native
+  get useNativeTools() {
+    return this.nativeTools && !this.toolsFailed && !this.baseUrl.includes('api.anthropic.com');
+  }
+
   /**
-   * Costruisce i messaggi OpenAI con la storia della conversazione
+   * Costruisce i messaggi OpenAI con la storia della conversazione.
+   * In modalità tool nativa: le azioni diventano assistant.tool_calls e
+   * i risultati messaggi role:"tool" — la ricostruzione funziona anche per
+   * history registrata in modalità ReAct (servono solo action/params/result).
    */
   buildMessages(history) {
+    const useTools = this.useNativeTools;
     const messages = [
-      { role: 'system', content: this.systemPrompt }
+      { role: 'system', content: this.systemPrompt + (useTools ? NATIVE_TOOLS_NOTE : '') }
     ];
 
     const supportsVision = VISION_MODELS.some(vm => this.model.toLowerCase().startsWith(vm.toLowerCase()));
 
-    for (const msg of history) {
+    for (let i = 0; i < history.length; i++) {
+      const msg = history[i];
       if (msg.role === 'user') {
         let content = msg.content;
         // Rimuovi immagini se il modello non supporta vision → evita 502
@@ -656,31 +841,59 @@ PARAMS: {"direction": "down", "amount": 700}`;
         messages.push({ role: 'user', content });
 
       } else if (msg.role === 'action') {
-        messages.push({
-          role: 'assistant',
-          content: msg.rawResponse ?? `ACTION: ${msg.action}\nPARAMS: ${JSON.stringify(msg.params ?? {})}`
-        });
+        if (useTools) {
+          // Formato tool calling nativo: assistant con tool_calls + risultato role "tool"
+          const callId = 'call_' + i;
+          messages.push({
+            role: 'assistant',
+            content: '',
+            tool_calls: [{
+              id: callId,
+              type: 'function',
+              function: { name: msg.action, arguments: JSON.stringify(msg.params ?? {}) }
+            }]
+          });
+          messages.push({ role: 'tool', tool_call_id: callId, content: String(msg.result ?? '') });
 
-        // Se c'è uno screenshot E il modello supporta vision → mandalo al modello
-        // così può vedere visivamente la pagina e capirne la struttura.
-        // Se c'è anche refImage (immagine di riferimento dell'utente), la inviamo INSIEME
-        // allo screenshot della pagina così il modello può confrontare i due.
-        if (msg.screenshot && supportsVision) {
-          const parts = [
-            { type: 'text', text: `[RISULTATO AZIONE]\n${msg.result}` },
-            { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${msg.screenshot}` } }
-          ];
-          // Allega immagine di riferimento utente se disponibile — permette confronto visivo
-          if (msg.refImage) {
-            parts.push({ type: 'text', text: '⬆️ SCREENSHOT PAGINA (sopra) | IMMAGINE RIFERIMENTO UTENTE (sotto) ⬇️ — confronta i prodotti nello screenshot con questo pezzo:' });
-            parts.push({ type: 'image_url', image_url: { url: msg.refImage } });
+          // Screenshot: il ruolo "tool" accetta solo testo → immagini in un messaggio user separato
+          if (msg.screenshot && supportsVision) {
+            const parts = [
+              { type: 'text', text: '[SCREENSHOT dopo l\'azione]' },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${msg.screenshot}` } }
+            ];
+            if (msg.refImage) {
+              parts.push({ type: 'text', text: '⬆️ SCREENSHOT PAGINA (sopra) | IMMAGINE RIFERIMENTO UTENTE (sotto) ⬇️ — confronta i prodotti nello screenshot con questo pezzo:' });
+              parts.push({ type: 'image_url', image_url: { url: msg.refImage } });
+            }
+            messages.push({ role: 'user', content: parts });
           }
-          messages.push({ role: 'user', content: parts });
         } else {
           messages.push({
-            role: 'user',
-            content: `[RISULTATO AZIONE]\n${msg.result}`
+            role: 'assistant',
+            content: msg.rawResponse ?? `ACTION: ${msg.action}\nPARAMS: ${JSON.stringify(msg.params ?? {})}`
           });
+
+          // Se c'è uno screenshot E il modello supporta vision → mandalo al modello
+          // così può vedere visivamente la pagina e capirne la struttura.
+          // Se c'è anche refImage (immagine di riferimento dell'utente), la inviamo INSIEME
+          // allo screenshot della pagina così il modello può confrontare i due.
+          if (msg.screenshot && supportsVision) {
+            const parts = [
+              { type: 'text', text: `[RISULTATO AZIONE]\n${msg.result}` },
+              { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${msg.screenshot}` } }
+            ];
+            // Allega immagine di riferimento utente se disponibile — permette confronto visivo
+            if (msg.refImage) {
+              parts.push({ type: 'text', text: '⬆️ SCREENSHOT PAGINA (sopra) | IMMAGINE RIFERIMENTO UTENTE (sotto) ⬇️ — confronta i prodotti nello screenshot con questo pezzo:' });
+              parts.push({ type: 'image_url', image_url: { url: msg.refImage } });
+            }
+            messages.push({ role: 'user', content: parts });
+          } else {
+            messages.push({
+              role: 'user',
+              content: `[RISULTATO AZIONE]\n${msg.result}`
+            });
+          }
         }
 
       } else if (msg.role === 'error') {
@@ -698,6 +911,7 @@ PARAMS: {"direction": "down", "amount": 700}`;
    * Chiama l'endpoint OpenAI-compatible e ottieni il prossimo step dell'agente
    */
   async think(history) {
+    const useTools = this.useNativeTools;
     const messages = this.buildMessages(history);
 
     // Timeout adattivo per modello:
@@ -746,7 +960,9 @@ PARAMS: {"direction": "down", "amount": 700}`;
           body: JSON.stringify({
             model:    this.model,
             messages: messages,
-            stream:   false
+            stream:   false,
+            // Tool calling nativo (se attivo): il fallback su errore è automatico
+            ...(useTools ? { tools: TOOL_DEFINITIONS, tool_choice: 'auto' } : {})
           }),
           signal: controller.signal
         });
@@ -766,21 +982,47 @@ PARAMS: {"direction": "down", "amount": 700}`;
         const errJson = await response.json();
         errMsg = errJson?.error?.message ?? (errJson?.error?.type ?? errMsg);
       } catch {}
+      // Endpoint/modello senza supporto tools → riprova subito in formato ReAct
+      if (useTools) {
+        this.toolsFailed = true;
+        return this.think(history);
+      }
       throw new Error(errMsg);
     }
 
     const json = await response.json();
 
     if (json.error) {
+      if (useTools) {
+        this.toolsFailed = true;
+        return this.think(history);
+      }
       throw new Error(json.error.message ?? json.error.type ?? JSON.stringify(json.error));
+    }
+
+    const msgObj = isAnthropic ? null : json.choices?.[0]?.message;
+
+    // Tool calling nativo: il modello ha emesso una tool call strutturata → niente parsing regex
+    if (useTools && msgObj?.tool_calls?.length) {
+      const tc = msgObj.tool_calls[0];
+      let params = {};
+      try {
+        params = typeof tc.function?.arguments === 'string'
+          ? JSON.parse(tc.function.arguments || '{}')
+          : (tc.function?.arguments ?? {});
+      } catch {}
+      const thought = (msgObj.content ?? '').replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+        || `Eseguo ${tc.function?.name}(${JSON.stringify(params).substring(0, 120)})`;
+      return { thought, action: tc.function?.name ?? 'done', params, raw: msgObj.content ?? '' };
     }
 
     // Anthropic risponde in json.content[0].text, OpenAI in json.choices[0].message.content
     const rawText = isAnthropic
       ? (json.content?.[0]?.text ?? '')
-      : (json.choices?.[0]?.message?.content ?? '');
+      : (msgObj?.content ?? '');
     if (!rawText) throw new Error('Il modello ha restituito una risposta vuota. Prova a riformulare il task o cambia modello.');
 
+    // Anche in modalità tools il modello può rispondere in formato testuale — il parser lo gestisce
     return this.parseResponse(rawText);
   }
 
@@ -803,7 +1045,14 @@ PARAMS: {"direction": "down", "amount": 700}`;
 
     // Estrai ACTION
     const actionMatch = text.match(/ACTION:\s*(\w+)/);
-    const action = actionMatch?.[1]?.trim() ?? 'done';
+
+    // Nessuna ACTION: il modello ha scritto solo testo libero (spesso è il report finale
+    // senza formato) → trattalo come done() con TUTTO il testo come messaggio,
+    // così il contenuto non va mai perso
+    if (!actionMatch) {
+      return { thought: text.substring(0, 150), action: 'done', params: { message: text }, raw: rawText };
+    }
+    const action = actionMatch[1].trim();
 
     // Estrai PARAMS (JSON)
     const paramsMatch = text.match(/PARAMS:\s*(\{[\s\S]+?\})/);
@@ -816,6 +1065,11 @@ PARAMS: {"direction": "down", "amount": 700}`;
         const pairs = paramsMatch[1].matchAll(/"(\w+)":\s*"([^"]+)"/g);
         for (const [, key, val] of pairs) params[key] = val;
       }
+    }
+
+    // done() senza message → usa il THOUGHT come resoconto (mai perdere il contenuto)
+    if (action === 'done' && !params.message && thought) {
+      params.message = thought;
     }
 
     return { thought, action, params, raw: rawText };

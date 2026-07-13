@@ -6,6 +6,10 @@ export class CDPController {
   constructor(tabId) {
     this.tabId    = tabId;
     this.attached = false;
+    // Buffer console e rete — riempiti dagli eventi CDP mentre l'agente è connesso
+    this.consoleBuf = [];
+    this.networkMap = new Map(); // requestId → {url, method, type, status, error}
+    this._eventHandler = null;
   }
 
   async attach() {
@@ -19,12 +23,57 @@ export class CDPController {
     this.attached = true;
     try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable', {}); } catch {}
     try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.enable', {}); } catch {}
+    // Domini per analisi tecnica: console del browser + richieste di rete
+    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable', {}); } catch {}
+    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Network.enable', {}); } catch {}
+    this._installEventListener();
   }
 
   async detach() {
+    if (this._eventHandler) {
+      chrome.debugger.onEvent.removeListener(this._eventHandler);
+      this._eventHandler = null;
+    }
     if (!this.attached) return;
     try { await chrome.debugger.detach({ tabId: this.tabId }); } catch {}
     this.attached = false;
+  }
+
+  // Registra console e rete dagli eventi CDP (come la tab Console/Network di DevTools)
+  _installEventListener() {
+    if (this._eventHandler) return;
+    this._eventHandler = (source, method, params) => {
+      if (source.tabId !== this.tabId) return;
+      try {
+        if (method === 'Runtime.consoleAPICalled') {
+          const text = (params.args || []).map(a => a.value ?? a.description ?? '').join(' ');
+          this._pushConsole(params.type, text);
+        } else if (method === 'Log.entryAdded') {
+          const e = params.entry || {};
+          this._pushConsole(e.level, `${e.text ?? ''}${e.url ? ' — ' + e.url : ''}`);
+        } else if (method === 'Network.requestWillBeSent') {
+          if (this.networkMap.size >= 400) return; // cap memoria
+          this.networkMap.set(params.requestId, {
+            url: params.request?.url ?? '', method: params.request?.method ?? 'GET',
+            type: params.type ?? '', status: null, error: null
+          });
+        } else if (method === 'Network.responseReceived') {
+          const e = this.networkMap.get(params.requestId);
+          if (e) { e.status = params.response?.status ?? null; e.type = params.type ?? e.type; }
+        } else if (method === 'Network.loadingFailed') {
+          const e = this.networkMap.get(params.requestId);
+          if (e) e.error = params.errorText ?? 'failed';
+        }
+      } catch {}
+    };
+    chrome.debugger.onEvent.addListener(this._eventHandler);
+  }
+
+  _pushConsole(level, text) {
+    const clean = (text ?? '').trim().substring(0, 300);
+    if (!clean) return;
+    this.consoleBuf.push({ level: level || 'log', text: clean });
+    if (this.consoleBuf.length > 150) this.consoleBuf.shift();
   }
 
   // Riconnessione automatica se il debugger viene staccato durante navigazioni/redirect
@@ -61,6 +110,8 @@ export class CDPController {
     // Dopo ogni navigazione ri-abilita i domini CDP (la pagina si è ricaricata)
     try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable', {}); } catch {}
     try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.enable', {}); } catch {}
+    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable', {}); } catch {}
+    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Network.enable', {}); } catch {}
   }
 
   // Attende che la pagina finisca di caricarsi (con fallback su timeout)
@@ -453,6 +504,214 @@ export class CDPController {
         if (el) el.scrollBy(0, ${direction === 'down' ? amount : -amount});
       })()`
     });
+    await this.sleep(300);
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // SET-OF-MARKS — numera visivamente gli elementi interattivi
+  // Tecnica usata dagli agent browser moderni: badge numerati sugli
+  // elementi cliccabili; il modello dice "clicca il 12" invece di
+  // stimare coordinate o indovinare selettori CSS.
+  // Funziona con TUTTI i modelli: ai vision arriva lo screenshot con
+  // i badge, a tutti arriva la lista testuale [n] <tag> testo → URL.
+  // ══════════════════════════════════════════════════════════
+
+  async markPage() {
+    const result = await this.cmd('Runtime.evaluate', {
+      expression: `(function() {
+        // Rimuovi marks precedenti
+        document.querySelectorAll('.diggio-som').forEach(e => e.remove());
+        window.__diggioMarks = [];
+
+        const els = Array.from(document.querySelectorAll(
+          'a[href],button,input:not([type=hidden]),select,textarea,' +
+          '[role=button],[role=link],[role=tab],[role=menuitem],[role=combobox],' +
+          '[role=checkbox],[role=radio],[role=option],[onclick],summary'
+        ));
+        const out = [];
+        let n = 0;
+        for (const el of els) {
+          if (n >= 120) break;
+          const r = el.getBoundingClientRect();
+          // Solo elementi visibili nella viewport corrente
+          if (r.width < 5 || r.height < 5) continue;
+          if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) continue;
+          const st = getComputedStyle(el);
+          if (st.visibility === 'hidden' || st.display === 'none' || st.opacity === '0') continue;
+
+          n++;
+          window.__diggioMarks[n] = el;
+
+          // Badge numerato (angolo alto-sinistra dell'elemento)
+          const badge = document.createElement('div');
+          badge.className = 'diggio-som';
+          badge.textContent = n;
+          badge.style.cssText = 'position:fixed;left:' + Math.max(0, r.left - 2) + 'px;top:' +
+            Math.max(0, r.top - 14) + 'px;background:#7c3aed;color:#fff;' +
+            'font:bold 11px/14px monospace;padding:0 4px;border-radius:3px;' +
+            'z-index:2147483647;pointer-events:none;box-shadow:0 0 2px #000;';
+          document.body.appendChild(badge);
+
+          // Bordo attorno all'elemento
+          const box = document.createElement('div');
+          box.className = 'diggio-som';
+          box.style.cssText = 'position:fixed;left:' + r.left + 'px;top:' + r.top + 'px;width:' +
+            r.width + 'px;height:' + r.height + 'px;outline:2px solid #7c3aed;' +
+            'z-index:2147483646;pointer-events:none;';
+          document.body.appendChild(box);
+
+          const tag = el.tagName.toLowerCase();
+          const text = (el.textContent || el.value || el.placeholder ||
+                        el.getAttribute('aria-label') || el.title || '')
+                        .trim().replace(/\\s+/g, ' ').substring(0, 60);
+          const href = el.href ? '  →  ' + el.href.substring(0, 90) : '';
+          out.push('[' + n + '] <' + tag + '> ' + text + href);
+        }
+        return out.join('\\n').substring(0, 4200) || 'Nessun elemento interattivo visibile nella viewport';
+      })()`,
+      returnByValue: true
+    });
+    await this.sleep(150); // lascia renderizzare i badge prima dello screenshot
+    return result?.result?.value ?? '';
+  }
+
+  // Rimuove i badge Set-of-Marks dalla pagina
+  async unmarkPage() {
+    try {
+      await this.cmd('Runtime.evaluate', {
+        expression: `document.querySelectorAll('.diggio-som').forEach(e => e.remove())`
+      });
+    } catch {}
+  }
+
+  // Clicca l'elemento numerato n dell'ultimo markPage (click fisico al centro)
+  async clickMark(n) {
+    const result = await this.cmd('Runtime.evaluate', {
+      expression: `(function() {
+        const el = (window.__diggioMarks || [])[${parseInt(n)}];
+        if (!el) return { ok: false, error: 'Elemento [${parseInt(n)}] non trovato — richiama mark_page (i numeri si azzerano dopo navigazioni/scroll)' };
+        el.scrollIntoView({ block: 'center', behavior: 'instant' });
+        const r = el.getBoundingClientRect();
+        if (r.width === 0) return { ok: false, error: 'Elemento [${parseInt(n)}] non più visibile' };
+        return { ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2,
+                 desc: (el.textContent || el.value || '').trim().substring(0, 50) };
+      })()`,
+      returnByValue: true
+    });
+    const val = result?.result?.value;
+    if (!val?.ok) throw new Error(val?.error ?? 'clickMark fallito');
+    await this.unmarkPage(); // togli i badge prima del click (per screenshot puliti dopo)
+    await this.clickCoords(val.x, val.y);
+    return val.desc;
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // ZOOM — screenshot ingrandito di una regione della viewport
+  // Per leggere testo piccolo (prezzi, codici) che nello screenshot
+  // intero risulta illeggibile ai modelli vision.
+  // x, y = angolo alto-sinistra della regione (coordinate viewport)
+  // ══════════════════════════════════════════════════════════
+
+  async zoomScreenshot(x = 0, y = 0, width = 600, height = 400) {
+    // Converte coordinate viewport → coordinate pagina (il clip CDP usa quelle)
+    const off = await this.cmd('Runtime.evaluate', {
+      expression: `JSON.stringify({sx: window.scrollX, sy: window.scrollY, vw: innerWidth, vh: innerHeight})`,
+      returnByValue: true
+    });
+    const { sx, sy, vw, vh } = JSON.parse(off?.result?.value ?? '{"sx":0,"sy":0,"vw":1280,"vh":800}');
+    const w = Math.max(100, Math.min(width, vw));
+    const h = Math.max(100, Math.min(height, vh));
+    const cx = Math.max(0, Math.min(x, vw - w));
+    const cy = Math.max(0, Math.min(y, vh - h));
+    const scale = Math.min(3, Math.max(1.5, 1200 / w)); // ingrandimento 1.5x–3x
+
+    const result = await this.cmd('Page.captureScreenshot', {
+      format: 'jpeg',
+      quality: 85,
+      captureBeyondViewport: true,
+      clip: { x: sx + cx, y: sy + cy, width: w, height: h, scale }
+    });
+    return result.data;
+  }
+
+  // ══════════════════════════════════════════════════════════
+  // ANALISI TECNICA — console browser, richieste di rete, tasti
+  // (come le tab Console/Network di DevTools)
+  // ══════════════════════════════════════════════════════════
+
+  // Messaggi console registrati da quando l'agente è connesso
+  readConsole() {
+    if (this.consoleBuf.length === 0) {
+      return 'Nessun messaggio in console da quando l\'agente è connesso. Se hai già navigato/ricaricato la pagina in questa sessione, significa che la pagina NON produce errori né warning (buon segno per la qualità del sito) — NON serve ricaricare di nuovo, prosegui con l\'analisi.';
+    }
+    const errors = this.consoleBuf.filter(e => e.level === 'error');
+    const warns  = this.consoleBuf.filter(e => e.level === 'warning' || e.level === 'warn');
+    const others = this.consoleBuf.filter(e => !errors.includes(e) && !warns.includes(e));
+    const fmt = (list, max) => list.slice(-max).map(e => `  [${e.level}] ${e.text}`).join('\n');
+
+    let out = `CONSOLE BROWSER (${this.consoleBuf.length} messaggi da inizio sessione):\n`;
+    if (errors.length) out += `\n❌ ERRORI (${errors.length}):\n` + fmt(errors, 20) + '\n';
+    if (warns.length)  out += `\n⚠️ WARNING (${warns.length}):\n` + fmt(warns, 12) + '\n';
+    if (others.length) out += `\nℹ️ LOG (${others.length}, ultimi 10):\n` + fmt(others, 10);
+    return out.substring(0, 3200);
+  }
+
+  // Riepilogo richieste di rete registrate da quando l'agente è connesso
+  readNetwork() {
+    const reqs = Array.from(this.networkMap.values());
+    if (reqs.length === 0) {
+      return 'Nessuna richiesta di rete registrata da quando l\'agente è connesso. Naviga/ricarica la pagina per catturare il traffico di caricamento, poi rileggi.';
+    }
+    // Fallita = status HTTP >= 400, oppure errore di rete SENZA alcuna risposta ricevuta.
+    // (I beacon analytics con 204 + connessione chiusa NON sono errori)
+    const failed = reqs.filter(r => (r.status && r.status >= 400) || (r.error && !r.status));
+    const xhr    = reqs.filter(r => r.type === 'XHR' || r.type === 'Fetch');
+    const scripts = reqs.filter(r => r.type === 'Script');
+    const byType = {};
+    reqs.forEach(r => { byType[r.type || 'Altro'] = (byType[r.type || 'Altro'] ?? 0) + 1; });
+    const host = u => { try { return new URL(u).hostname; } catch { return u.substring(0, 40); } };
+
+    let out = `RICHIESTE DI RETE (${reqs.length} da inizio sessione):\n`;
+    out += 'Per tipo: ' + Object.entries(byType).map(([t, n]) => `${t}:${n}`).join(', ') + '\n';
+    if (failed.length) {
+      out += `\n❌ FALLITE / ERRORI (${failed.length}):\n` +
+        failed.slice(-15).map(r => `  [${r.status ?? r.error}] ${r.method} ${r.url.substring(0, 110)}`).join('\n') + '\n';
+    }
+    if (xhr.length) {
+      out += `\n📡 CHIAMATE XHR/FETCH (${xhr.length}, ultime 20):\n` +
+        xhr.slice(-20).map(r => `  [${r.status ?? '…'}] ${r.method} ${r.url.substring(0, 110)}`).join('\n') + '\n';
+    }
+    if (scripts.length) {
+      const domains = [...new Set(scripts.map(r => host(r.url)))].slice(0, 15);
+      out += `\n📜 SCRIPT (${scripts.length}) da domini: ${domains.join(', ')}`;
+    }
+    return out.substring(0, 3200);
+  }
+
+  // Preme un tasto della tastiera (Enter, Escape, frecce, ecc.)
+  async pressKey(name) {
+    const KEYS = {
+      enter:      { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
+      tab:        { key: 'Tab', code: 'Tab', keyCode: 9 },
+      escape:     { key: 'Escape', code: 'Escape', keyCode: 27 },
+      esc:        { key: 'Escape', code: 'Escape', keyCode: 27 },
+      backspace:  { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+      delete:     { key: 'Delete', code: 'Delete', keyCode: 46 },
+      space:      { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
+      arrowdown:  { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+      arrowup:    { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+      arrowleft:  { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+      arrowright: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+      pagedown:   { key: 'PageDown', code: 'PageDown', keyCode: 34 },
+      pageup:     { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+      home:       { key: 'Home', code: 'Home', keyCode: 36 },
+      end:        { key: 'End', code: 'End', keyCode: 35 },
+    };
+    const k = KEYS[(name ?? '').toLowerCase().replace(/[\s_-]/g, '')];
+    if (!k) throw new Error(`Tasto non supportato: "${name}" — usa: Enter, Tab, Escape, Space, Backspace, Delete, ArrowDown/Up/Left/Right, PageDown/Up, Home, End`);
+    await this.cmd('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode, key: k.key, code: k.code });
+    if (k.text) await this.cmd('Input.dispatchKeyEvent', { type: 'char', text: k.text });
+    await this.cmd('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode, key: k.key, code: k.code });
     await this.sleep(300);
   }
 

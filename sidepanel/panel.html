@@ -60,7 +60,7 @@
       <div class="guide-item"><strong>🖼️ Allega</strong> — allega un'immagine come riferimento visivo (es. il pezzo da cercare)</div>
       <div class="guide-item"><strong>📸 Screenshot</strong> — cattura uno screenshot della pagina attiva</div>
       <div class="guide-item"><strong>📄 Report</strong> — scarica la sessione come file HTML completo</div>
-      <div class="guide-item"><strong>🗑️ Cancella chat</strong> — pulisce la chat e salva la sessione nella cronologia</div>
+      <div class="guide-item"><strong>🗑️ Nuova conversazione</strong> — pulisce chat e memoria dell'agente, salvando la sessione nella cronologia</div>
     </div>
 
     <!-- HEADER -->
@@ -90,6 +90,10 @@
       <div class="guide-item">Controlla il sito su VirusTotal, Google Safe Browsing, URLhaus, SSLLabs, SecurityHeaders. Include <strong>scansione del codice sorgente</strong> live per rilevare: codice offuscato, iframe nascosti, crypto miner, keylogger, redirect sospetti e payload in base64</div>
       <div class="guide-h3">🕵️ Verifica Sito Truffa</div>
       <div class="guide-item">Analizza 15 indicatori di truffa (prezzi, contatti, P.IVA, grammatica, policy, pagamenti…) + cerca recensioni su Google, Trustpilot, WHOIS e Wayback Machine. Verdetto: Legittimo / Sospetto / Truffa</div>
+      <div class="guide-h3">📣 Analisi Google Ads</div>
+      <div class="guide-item">Analizza campagne, parole chiave, termini di ricerca e annunci del tuo account Google Ads, con correzioni opzionali sempre confermate da te</div>
+      <div class="guide-h3">📚 Memoria Siti</div>
+      <div class="guide-item">Elenco degli appunti che l'agente ha imparato sui siti visitati — puoi dimenticare un sito singolo o tutti</div>
     </div>
 
     <!-- AUTOMAZIONI -->
@@ -118,6 +122,12 @@
       <div class="guide-cmd"><code>screenshot()</code> cattura screenshot</div>
       <div class="guide-cmd"><code>execute_js(codice)</code> esegue JavaScript nella pagina e restituisce il risultato</div>
       <div class="guide-cmd"><code>click_coords(x, y)</code> click fisico su coordinate schermo</div>
+      <div class="guide-cmd"><code>mark_page()</code> Set-of-Marks: numera gli elementi cliccabili (badge + lista)</div>
+      <div class="guide-cmd"><code>click_element(n)</code> clicca l'elemento numerato n di mark_page</div>
+      <div class="guide-cmd"><code>zoom(x, y)</code> screenshot ingrandito di una regione (per testo piccolo)</div>
+      <div class="guide-cmd"><code>press_key(tasto)</code> preme un tasto (Enter, Escape, Tab, frecce…)</div>
+      <div class="guide-cmd"><code>read_console()</code> legge la console del browser (errori JS, warning)</div>
+      <div class="guide-cmd"><code>read_network()</code> riepilogo richieste di rete (XHR, script, errori 404/500)</div>
       <div class="guide-cmd"><code>scroll_within(selector, dir, px)</code> scrolla dentro un elemento</div>
       <div class="guide-cmd"><code>open_tab(url)</code> apre URL in nuova scheda del gruppo</div>
       <div class="guide-cmd"><code>open_tabs([url1, url2…])</code> apre più schede raggruppate</div>
@@ -127,7 +137,35 @@
       <div class="guide-cmd"><code>scroll(dir)</code> scrolla senza screenshot</div>
       <div class="guide-cmd"><code>wait(secondi)</code> attendi N secondi</div>
       <div class="guide-cmd"><code>save_report()</code> scarica il report HTML della sessione</div>
+      <div class="guide-cmd"><code>remember(nota, sito?)</code> salva un appunto permanente su come usare un sito</div>
+      <div class="guide-cmd"><code>ask_user(domanda)</code> l'agente ti fa una domanda e aspetta la tua risposta</div>
       <div class="guide-cmd"><code>done(messaggio)</code> dichiara il task completato con risultato</div>
+    </div>
+
+    <!-- MEMORIA E INTERATTIVITÀ -->
+    <div class="guide-section">
+      <div class="guide-h2">🧠 Memoria e interattività</div>
+      <div class="guide-item">L'agente <strong>ricorda i task precedenti</strong> della stessa conversazione: puoi fare domande di follow-up ("apri il secondo che hai trovato") senza ripetere tutto</div>
+      <div class="guide-item">Con <code>ask_user</code> l'agente può <strong>farti domande a metà task</strong>: il bottone diventa <strong>↩ Rispondi</strong> — scrivi la risposta e premi Enter</div>
+      <div class="guide-item"><strong>📚 Memoria Siti</strong>: l'agente impara come si usa ogni sito (selettori, trucchi, pattern URL) e riusa gli appunti alle visite successive — gestibili in 🛠️ Strumenti</div>
+      <div class="guide-item"><strong>🗑️ Nuova conversazione</strong> azzera chat e memoria della conversazione (gli appunti sui siti restano)</div>
+    </div>
+
+    <!-- PRECISIONE -->
+    <div class="guide-section">
+      <div class="guide-h2">🎯 Precisione (v1.3)</div>
+      <div class="guide-item"><strong>Set-of-Marks</strong>: con <code>mark_page()</code> l'agente numera visivamente tutti gli elementi cliccabili (badge viola) e clicca per numero con <code>click_element(n)</code> — il metodo più affidabile su siti complessi. Funziona con tutti i modelli (c'è anche la lista testuale)</div>
+      <div class="guide-item"><strong>Zoom</strong>: <code>zoom(x, y)</code> cattura una regione ingrandita per leggere prezzi, codici e testo piccolo</div>
+      <div class="guide-item"><strong>🔧 Tool calling nativo</strong> (⚙️ Impostazioni): le azioni diventano chiamate funzione strutturate — zero errori di parsing. Fallback automatico al formato classico se il modello non lo supporta</div>
+      <div class="guide-item"><strong>🔬 Analisi tecnica</strong>: come DevTools — <code>read_console()</code> legge errori JS e warning, <code>read_network()</code> mostra chiamate XHR/fetch, script caricati e risorse fallite. Lo strumento 📈 SEO le usa automaticamente</div>
+      <div class="guide-item"><strong>🟣 Gruppo scheda agente</strong>: all'avvio la scheda controllata dall'agente entra nel gruppo viola "🤖 Diggio Agent" — vedi sempre dove sta lavorando</div>
+    </div>
+
+    <!-- GOOGLE ADS -->
+    <div class="guide-section">
+      <div class="guide-h2">📣 Google Ads</div>
+      <div class="guide-item">Strumento <strong>📣 Analisi Google Ads</strong> in 🛠️ Strumenti: analizza campagne, keyword, termini di ricerca e annunci del tuo account (devi essere loggato)</div>
+      <div class="guide-item">Con <strong>🔧 correzioni</strong> attivo, l'agente propone e applica fix — ma <strong>ogni modifica su ads.google.com richiede la tua conferma</strong>, anche in modalità Auto (protezione budget)</div>
     </div>
 
     <!-- MODELLI -->
@@ -138,8 +176,10 @@
       <div class="guide-item"><span class="guide-tag tag-green">Groq</span> llama-3.3-70b, mixtral-8x7b, gemma2-9b — gratis con limiti</div>
       <div class="guide-item"><span class="guide-tag tag-purple">OpenRouter</span> Accesso a centinaia di modelli con un'unica API Key (incluso Claude)</div>
       <div class="guide-item"><span class="guide-tag tag-blue">Perplexity</span> sonar, sonar-pro, sonar-reasoning — con ricerca web integrata</div>
-      <div class="guide-item"><span class="guide-tag tag-green">Ollama (locale)</span> Qualsiasi modello installato sul tuo PC — 100% privato, nessun costo</div>
-      <div class="guide-item"><span class="guide-tag tag-blue">Endpoint Custom</span> Qualsiasi server OpenAI-compatible (Open WebUI, LM Studio, llama.cpp…)</div>
+      <div class="guide-item"><span class="guide-tag tag-green">Ollama (locale)</span> Qualsiasi modello installato sul tuo PC — 100% privato, nessun costo. Avvia Ollama con <code>OLLAMA_ORIGINS=chrome-extension://*</code></div>
+      <div class="guide-item"><span class="guide-tag tag-purple">Ollama.com (cloud)</span> Modelli cloud di Ollama con API Key da ollama.com/settings/keys</div>
+      <div class="guide-item"><span class="guide-tag tag-green">LM Studio (locale)</span> Modelli sul tuo PC via LM Studio — attiva il server (Developer → Start Server) con CORS</div>
+      <div class="guide-item"><span class="guide-tag tag-blue">Endpoint Custom</span> Qualsiasi server OpenAI-compatible (Open WebUI, llama.cpp…)</div>
       <div class="guide-item">Per vision (immagini): usa modelli che la supportano — gpt-4o, claude-3, llava, gemma3, llama-3.2-vision</div>
     </div>
 
@@ -149,6 +189,7 @@
       <div class="guide-contact">
         <div class="contact-name">Antonio Di Giorgio</div>
         <div class="contact-alias">— per tutti <strong>Diggio3000</strong></div>
+        <a href="https://www.diggio3000.it" target="_blank" rel="noopener" class="contact-email">🌐 www.diggio3000.it</a>
         <a href="mailto:diggiotelefonia@gmail.com" class="contact-email">📧 diggiotelefonia@gmail.com</a>
         <div class="contact-note">Per supporto, segnalazioni o collaborazioni</div>
       </div>
@@ -296,6 +337,32 @@
 
     <div class="tool-divider"></div>
 
+    <!-- Sezione 5b: Analisi Google Ads -->
+    <div class="tool-section">
+      <div class="tool-section-title">📣 Analisi Google Ads</div>
+      <select id="adsScope" class="tool-input">
+        <option value="full" selected>Analisi completa account</option>
+        <option value="campaigns">Solo campagne (budget, CTR, CPC)</option>
+        <option value="keywords">Solo parole chiave e termini di ricerca</option>
+        <option value="ads">Solo annunci (stato, rifiutati)</option>
+      </select>
+      <label class="tool-check"><input type="checkbox" id="adsFix"> 🔧 Proponi e applica correzioni (chiede conferma per ognuna)</label>
+      <div style="font-size:11px;color:#94a3b8;margin:2px 0 6px">Devi essere già loggato su ads.google.com in Chrome. Ogni modifica richiede la tua approvazione.</div>
+      <button id="btnAdsGenera" class="btn-primary btn-sm" style="width:100%">📣 Avvia analisi Ads</button>
+    </div>
+
+    <div class="tool-divider"></div>
+
+    <!-- Sezione 5c: Memoria Siti (apprendimento) -->
+    <div class="tool-section">
+      <div class="tool-section-title">📚 Memoria Siti (apprendimento)</div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Appunti che l'agente ha imparato sui siti (selettori funzionanti, trucchi, pattern URL). Li riusa automaticamente a ogni visita.</div>
+      <div id="siteKnowledgeList" class="template-list"></div>
+      <button id="btnClearKnowledge" class="btn-danger btn-sm" style="width:100%">🗑 Dimentica tutti i siti</button>
+    </div>
+
+    <div class="tool-divider"></div>
+
     <!-- Sezione 6: Controllo Sicurezza -->
     <div class="tool-section">
       <div class="tool-section-title">🛡️ Controllo Sicurezza Sito</div>
@@ -334,6 +401,8 @@
       <option value="openrouter">OpenRouter</option>
       <option value="perplexity">Perplexity AI</option>
       <option value="ollama">Ollama (locale)</option>
+      <option value="ollama_cloud">Ollama.com (cloud)</option>
+      <option value="lmstudio">LM Studio (locale)</option>
       <option value="custom">Endpoint custom…</option>
     </select>
 
@@ -350,6 +419,9 @@
     </div>
     <select id="modelSelect" class="hidden" style="margin-top:4px"></select>
     <div id="modelLoadStatus" style="font-size:11px;color:var(--text-muted);margin-top:2px"></div>
+
+    <label class="tool-check" style="margin-top:8px"><input type="checkbox" id="nativeToolsCheck"> 🔧 Tool calling nativo (sperimentale)</label>
+    <div style="font-size:11px;color:var(--text-muted);margin:2px 0 6px">Azioni come chiamate funzione strutturate: niente errori di parsing. Se il modello non lo supporta, torna da solo al formato classico — funziona con tutti i modelli.</div>
 
     <button id="btnSaveSettings" class="btn-primary" style="margin-top:10px">💾 Salva e testa</button>
     <div id="testResult"></div>
@@ -416,7 +488,7 @@
         <button id="btnAttach"     class="icon-btn" title="Allega immagine">🖼️</button>
         <button id="btnScreenshot" class="icon-btn" title="Screenshot pagina">📸</button>
         <button id="btnDownload"   class="icon-btn" title="Scarica report HTML">📄</button>
-        <button id="btnClearChat"  class="icon-btn" title="Cancella chat">🗑️</button>
+        <button id="btnClearChat"  class="icon-btn" title="Nuova conversazione (pulisce chat e memoria dell'agente)">🗑️</button>
       </div>
     </div>
 
@@ -440,6 +512,8 @@
     <span class="footer-brand">Diggio Agent IA</span>
     <span class="footer-sep">·</span>
     <span class="footer-author">Antonio Di Giorgio</span>
+    <span class="footer-sep">·</span>
+    <a href="https://www.diggio3000.it" target="_blank" rel="noopener" class="footer-author" style="text-decoration:none">www.diggio3000.it</a>
     <span class="footer-sep">·</span>
     <span id="footerVersion" class="footer-version">v1.0.0</span>
   </footer>

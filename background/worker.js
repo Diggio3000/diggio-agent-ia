@@ -6,7 +6,131 @@ import { TabManager }    from './tab-manager.js';
 let agentRunning      = false;
 let shouldStop        = false;
 let approvalResolver  = null;   // per modalità "chiedi prima"
+let userReplyResolver = null;   // per azione ask_user (attesa risposta utente)
 let currentAutoId     = null;   // id automazione in esecuzione (null = task manuale)
+
+// ══════════════════════════════════════════════════════════════
+// MEMORIA CONVERSAZIONE — persiste tra un task e l'altro
+// (chrome.storage.session sopravvive al riavvio del service worker,
+//  si azzera solo alla chiusura del browser o con "Nuova conversazione")
+// ══════════════════════════════════════════════════════════════
+
+const MAX_MEMORY_ENTRIES = 60;
+
+async function loadConversation() {
+  try {
+    const { conversation } = await chrome.storage.session.get('conversation');
+    return Array.isArray(conversation) ? conversation : [];
+  } catch { return []; }
+}
+
+async function saveConversation(history) {
+  try {
+    // Versione "slim": senza screenshot/immagini (troppo pesanti per lo storage),
+    // risultati troncati, limitata alle ultime MAX_MEMORY_ENTRIES voci
+    const slim = history.slice(-MAX_MEMORY_ENTRIES).map(m => {
+      const c = { ...m };
+      delete c.screenshot;
+      delete c.refImage;
+      if (typeof c.result === 'string' && c.result.length > 3000) {
+        c.result = c.result.substring(0, 3000) + '…[troncato]';
+      }
+      if (Array.isArray(c.content)) {
+        c.content = c.content.filter(p => p.type === 'text');
+        if (c.content.length === 1) c.content = c.content[0].text;
+      }
+      return c;
+    });
+    await chrome.storage.session.set({ conversation: slim });
+  } catch {}
+}
+
+async function clearConversation() {
+  try { await chrome.storage.session.remove('conversation'); } catch {}
+}
+
+// Comprimi la history prima di inviarla al modello: le voci vecchie perdono
+// screenshot e vengono troncate, le ultime KEEP_FULL restano integrali.
+// Evita di sforare il contesto nei task lunghi o nelle conversazioni continue.
+function compressHistory(history) {
+  const KEEP_FULL = 6;
+  return history.map((m, i) => {
+    if (i >= history.length - KEEP_FULL) return m;
+    const c = { ...m };
+    delete c.screenshot;
+    delete c.refImage;
+    if (typeof c.result === 'string' && c.result.length > 600) {
+      c.result = c.result.substring(0, 600) + '…[troncato]';
+    }
+    if (Array.isArray(c.content)) {
+      const textOnly = c.content.filter(p => p.type === 'text');
+      c.content = textOnly.length === 1 ? textOnly[0].text : textOnly;
+    }
+    return c;
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// MEMORIA SITI — apprendimento permanente per dominio
+// L'agente salva con remember() gli appunti su come interagire con
+// ogni sito (selettori funzionanti, pattern URL, trucchi); vengono
+// reiniettati automaticamente quando naviga sullo stesso dominio.
+// Persistenza: chrome.storage.local (sopravvive al riavvio browser)
+// ══════════════════════════════════════════════════════════════
+
+const MAX_NOTES_PER_SITE = 12;
+
+function normalizeDomain(domain) {
+  return (domain || '').trim().toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').split('/')[0];
+}
+
+async function getSiteKnowledge() {
+  return new Promise(r => chrome.storage.local.get('siteKnowledge', d => r(d.siteKnowledge || {})));
+}
+
+async function addSiteNote(domain, note) {
+  const d = normalizeDomain(domain);
+  const clean = (note || '').trim().substring(0, 300);
+  if (!d || !clean) return false;
+  const all = await getSiteKnowledge();
+  const entry = all[d] ?? { notes: [] };
+  if (!entry.notes.includes(clean)) {
+    entry.notes.push(clean);
+    if (entry.notes.length > MAX_NOTES_PER_SITE) entry.notes = entry.notes.slice(-MAX_NOTES_PER_SITE);
+  }
+  entry.updated = new Date().toISOString();
+  all[d] = entry;
+  await chrome.storage.local.set({ siteKnowledge: all });
+  return true;
+}
+
+// Appunti appresi per l'URL corrente, pronti da iniettare nel contesto del modello
+async function notesForUrl(url) {
+  try {
+    const host = normalizeDomain(new URL(url).hostname);
+    const all = await getSiteKnowledge();
+    const entry = all[host];
+    if (!entry?.notes?.length) return '';
+    return `\n\n📚 APPUNTI APPRESI SU ${host} (da sessioni precedenti — APPLICALI subito):\n`
+      + entry.notes.map(n => `  • ${n}`).join('\n');
+  } catch { return ''; }
+}
+
+// ══════════════════════════════════════════════════════════════
+// AZIONI SENSIBILI — approvazione forzata anche in modalità auto
+// (su questi domini un click sbagliato tocca budget/denaro reale)
+// ══════════════════════════════════════════════════════════════
+
+const SENSITIVE_DOMAINS = ['ads.google.com'];
+const WRITE_ACTIONS = ['click', 'click_text', 'type', 'select_option', 'submit_form', 'execute_js', 'click_coords'];
+
+async function isSensitiveAction(cdp, action) {
+  if (!WRITE_ACTIONS.includes(action)) return false;
+  try {
+    const url = await cdp.getUrl();
+    return SENSITIVE_DOMAINS.some(d => (url || '').includes(d));
+  } catch { return false; }
+}
 
 /**
  * Auto-dismiss cookie banner e popup dopo ogni navigate/submit_form.
@@ -95,12 +219,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'START_AGENT') {
     if (agentRunning) { sendUpdate('⚠️ Agente già in esecuzione!', 'error'); return; }
-    startAgent(msg.task, msg.apiKey, msg.model, msg.endpoint ?? null, msg.tabId ?? null, msg.mode ?? 'auto', msg.imageData ?? null, msg.sessionContext ?? null);
+    startAgent(msg.task, msg.apiKey, msg.model, msg.endpoint ?? null, msg.tabId ?? null, msg.mode ?? 'auto', msg.imageData ?? null, msg.sessionContext ?? null, { nativeTools: msg.nativeTools === true });
   }
 
   if (msg.type === 'STOP_AGENT') {
     shouldStop = true;
-    if (approvalResolver) { approvalResolver('stop'); approvalResolver = null; }
+    if (approvalResolver)  { approvalResolver('stop');   approvalResolver  = null; }
+    if (userReplyResolver) { userReplyResolver(null);    userReplyResolver = null; }
     sendUpdate('⏹ Stop richiesto...', 'info');
   }
 
@@ -110,6 +235,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'SKIP_ACTION') {
     if (approvalResolver) { approvalResolver('skip'); approvalResolver = null; }
+  }
+
+  if (msg.type === 'USER_REPLY') {
+    if (userReplyResolver) { userReplyResolver(msg.text ?? ''); userReplyResolver = null; }
+  }
+
+  if (msg.type === 'NEW_CONVERSATION') {
+    clearConversation();
+  }
+
+  // ── Memoria siti (per il pannello 📚) ─────────────────────
+  if (msg.type === 'GET_SITE_KNOWLEDGE') {
+    getSiteKnowledge().then(knowledge => sendResponse({ knowledge }));
+    return true; // async response
+  }
+
+  if (msg.type === 'DELETE_SITE_KNOWLEDGE') {
+    (async () => {
+      const all = await getSiteKnowledge();
+      if (msg.domain) delete all[msg.domain];
+      await chrome.storage.local.set({ siteKnowledge: msg.domain ? all : {} });
+      sendResponse({ ok: true });
+    })();
+    return true;
   }
 
   if (msg.type === 'SCREENSHOT') { takeScreenshot(); }
@@ -168,14 +317,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 });
 
-async function startAgent(task, apiKey, model, endpoint, targetTabId, mode, imageData, sessionContext) {
+async function startAgent(task, apiKey, model, endpoint, targetTabId, mode, imageData, sessionContext, opts = {}) {
   agentRunning = true;
   shouldStop   = false;
+  const useMemory = opts.useMemory !== false;  // false per le automazioni (non toccano la chat)
 
   const client = new DiggioClient(
     apiKey,
     model,
-    endpoint ?? 'https://api.openai.com/v1/chat/completions'
+    endpoint ?? 'https://api.openai.com/v1/chat/completions',
+    { nativeTools: opts.nativeTools === true }
   );
 
   let tab;
@@ -191,14 +342,34 @@ async function startAgent(task, apiKey, model, endpoint, targetTabId, mode, imag
   if (mode === 'ask_first') sendUpdate('🔔 Modalità "chiedi prima" attiva — approva ogni azione', 'info');
 
   const cdp = new CDPController(tab.id);
+  let history = null;   // dichiarata fuori dal try per salvarla nel finally
 
   try {
     await cdp.attach();
     sendUpdate('🔗 Connesso al browser', 'info');
 
-    // Costruisci il primo messaggio — include contesto sessione precedente se presente
+    // Raggruppa la scheda di lavoro nel gruppo colorato dell'agente:
+    // indicatore visivo di quale scheda sta controllando l'agente
+    try {
+      const existing = await chrome.tabGroups.query({ title: '🤖 Diggio Agent' });
+      if (existing.length > 0) {
+        await chrome.tabs.group({ tabIds: [tab.id], groupId: existing[0].id });
+      } else {
+        const gid = await chrome.tabs.group({ tabIds: [tab.id] });
+        await chrome.tabGroups.update(gid, { title: '🤖 Diggio Agent', color: 'purple' });
+      }
+    } catch {}
+
+    // ── MEMORIA: riprendi la conversazione precedente se esiste ──
+    history = useMemory ? await loadConversation() : [];
+    if (history.length > 0) {
+      sendUpdate(`🧠 Continuo la conversazione precedente (${history.length} passi in memoria)`, 'info');
+    }
+
+    // Costruisci il primo messaggio — il contesto sessione (chat ripristinata da
+    // cronologia) si usa solo se la memoria del worker è vuota, per non duplicare
     let taskText = task;
-    if (sessionContext) {
+    if (sessionContext && history.length === 0) {
       taskText = `## CONTESTO SESSIONE PRECEDENTE (stessa chat, continua da qui):\n${sessionContext}\n\n## NUOVO MESSAGGIO UTENTE:\n${task}`;
       sendUpdate('🔗 Contesto sessione precedente incluso', 'info');
     }
@@ -210,10 +381,10 @@ async function startAgent(task, apiKey, model, endpoint, targetTabId, mode, imag
       ? [{ type: 'text', text: taskText }, { type: 'image_url', image_url: { url: imageData } }]
       : taskText;
 
-    const history = [{ role: 'user', content: firstContent }];
+    history.push({ role: 'user', content: firstContent });
 
     let step = 0;
-    const maxSteps = 30;
+    const maxSteps = 40;
 
     while (step < maxSteps && !shouldStop) {
       step++;
@@ -221,7 +392,7 @@ async function startAgent(task, apiKey, model, endpoint, targetTabId, mode, imag
 
       let parsed;
       try {
-        parsed = await client.think(history);
+        parsed = await client.think(compressHistory(history));
       } catch (e) {
         sendUpdate(`❌ Errore API: ${e.message}`, 'error');
         history.push({ role: 'error', content: e.message });
@@ -231,10 +402,20 @@ async function startAgent(task, apiKey, model, endpoint, targetTabId, mode, imag
 
       sendUpdate(`💭 ${parsed.thought}`, 'thought');
 
-      // Modalità "chiedi prima" — aspetta approvazione
-      if (parsed.action !== 'done' && mode === 'ask_first') {
+      // Approvazione: sempre in modalità "chiedi prima"; FORZATA per azioni di
+      // scrittura su domini sensibili (es. Google Ads: tocca budget reali)
+      let requireApproval = mode === 'ask_first';
+      let sensitiveNote   = '';
+      if (!requireApproval && parsed.action !== 'done' && parsed.action !== 'ask_user'
+          && await isSensitiveAction(cdp, parsed.action)) {
+        requireApproval = true;
+        sensitiveNote   = '🛡️ AZIONE SENSIBILE (Google Ads — può toccare budget reali)\n';
+        sendUpdate('🛡️ Azione su dominio sensibile — richiedo la tua conferma anche in modalità Auto', 'info');
+      }
+
+      if (parsed.action !== 'done' && requireApproval) {
         sendUpdate(
-          `⚡ Azione proposta: ${parsed.action}(${JSON.stringify(parsed.params)})`,
+          `${sensitiveNote}⚡ Azione proposta: ${parsed.action}(${JSON.stringify(parsed.params)})`,
           'approval_request',
           { action: parsed.action, params: parsed.params }
         );
@@ -303,19 +484,36 @@ async function startAgent(task, apiKey, model, endpoint, targetTabId, mode, imag
     }
 
     if (shouldStop)       sendUpdate('⏹ Agente fermato', 'info');
-    if (step >= maxSteps) sendUpdate('⚠️ Limite passi raggiunto (30)', 'error');
+    if (step >= maxSteps) sendUpdate('⚠️ Limite passi raggiunto (40)', 'error');
 
   } catch (e) {
     sendUpdate(`❌ Errore critico: ${e.message}`, 'error');
   } finally {
+    // Salva la conversazione per il prossimo task (memoria continua)
+    if (useMemory && Array.isArray(history) && history.length > 0) {
+      await saveConversation(history);
+    }
     await cdp.detach();
     agentRunning = false;
     sendUpdate('🔌 Sessione terminata', 'info');
   }
 }
 
+// Attesa con keepalive: un ping ogni 20s evita che Chrome termini il service
+// worker MV3 (inattivo dopo ~30s) mentre aspettiamo l'input dell'utente
+function waitWithKeepalive(setResolver) {
+  return new Promise(resolve => {
+    const ka = setInterval(() => { try { chrome.runtime.getPlatformInfo(() => {}); } catch {} }, 20000);
+    setResolver(value => { clearInterval(ka); resolve(value); });
+  });
+}
+
 function waitForApproval() {
-  return new Promise(resolve => { approvalResolver = resolve; });
+  return waitWithKeepalive(fn => { approvalResolver = fn; });
+}
+
+function waitForUserReply() {
+  return waitWithKeepalive(fn => { userReplyResolver = fn; });
 }
 
 async function executeAction(cdp, action, params, referenceImage = null) {
@@ -376,6 +574,9 @@ async function executeAction(cdp, action, params, referenceImage = null) {
       }
       text += `\n\nTESTO PAGINA:\n${pageContent || '(in caricamento)'}`;
 
+      // Inietta gli appunti appresi su questo dominio (memoria siti)
+      text += await notesForUrl(params.url);
+
       // Restituisce oggetto {text, screenshot} — il loop principale lo gestisce
       return { text, screenshot: screenshotB64 };
     }
@@ -388,7 +589,13 @@ async function executeAction(cdp, action, params, referenceImage = null) {
       let afterContent = '';
       try { afterContent = (await cdp.readPage()).substring(0, 2000); } catch {}
       const currentUrl = await cdp.getUrl().catch(() => '');
-      return `Cliccato: ${params.selector}\nURL attuale: ${currentUrl}\n\n[STATO PAGINA]\n${afterContent}`;
+      // Screenshot post-click → il modello VEDE l'effetto dell'azione (verifica visiva)
+      let shot = null;
+      try {
+        shot = await cdp.screenshot();
+        chrome.runtime.sendMessage({ type: 'AGENT_UPDATE', updateType: 'screenshot', data: shot });
+      } catch {}
+      return { text: `Cliccato: ${params.selector}\nURL attuale: ${currentUrl}\n\n[STATO PAGINA]\n${afterContent}\n\n⚠️ VERIFICA nello screenshot che il click abbia avuto l'effetto atteso.`, screenshot: shot };
     }
     case 'click_text': {
       await cdp.clickByText(params.text);
@@ -398,7 +605,13 @@ async function executeAction(cdp, action, params, referenceImage = null) {
       let afterContent = '';
       try { afterContent = (await cdp.readPage()).substring(0, 2000); } catch {}
       const currentUrl = await cdp.getUrl().catch(() => '');
-      return `Cliccato testo: "${params.text}"\nURL attuale: ${currentUrl}\n\n[STATO PAGINA]\n${afterContent}`;
+      // Screenshot post-click → il modello VEDE l'effetto dell'azione (verifica visiva)
+      let shot = null;
+      try {
+        shot = await cdp.screenshot();
+        chrome.runtime.sendMessage({ type: 'AGENT_UPDATE', updateType: 'screenshot', data: shot });
+      } catch {}
+      return { text: `Cliccato testo: "${params.text}"\nURL attuale: ${currentUrl}\n\n[STATO PAGINA]\n${afterContent}\n\n⚠️ VERIFICA nello screenshot che il click abbia avuto l'effetto atteso.`, screenshot: shot };
     }
     case 'type':
       await cdp.typeText(params.selector, params.text);
@@ -574,6 +787,30 @@ async function executeAction(cdp, action, params, referenceImage = null) {
       // Invia segnale al pannello per scaricare il report HTML della sessione corrente
       chrome.runtime.sendMessage({ type: 'AGENT_UPDATE', updateType: 'save_report' }).catch(() => {});
       return 'Report scaricato nel browser dell\'utente';
+    case 'remember': {
+      // Salva un appunto permanente su come interagire con un sito.
+      // Il modello lo usa quando scopre selettori/pattern/trucchi riutilizzabili.
+      const note = params.note ?? params.text ?? '';
+      let domain = params.domain ?? '';
+      if (!domain) {
+        try { domain = new URL(await cdp.getUrl()).hostname; } catch {}
+      }
+      const ok = await addSiteNote(domain, note);
+      if (ok) sendUpdate(`📚 Appreso su ${normalizeDomain(domain)}: ${note.substring(0, 100)}`, 'info');
+      return ok
+        ? `Appunto salvato per ${normalizeDomain(domain)} — lo ritroverai nelle prossime visite a questo sito`
+        : 'ERRORE: nota o dominio mancante';
+    }
+    case 'ask_user': {
+      // Fa una domanda all'utente e attende la risposta nel pannello.
+      // Fondamentale per: conferme prima di modifiche (Google Ads, CMS),
+      // chiarimenti sul task, scelta tra più opzioni trovate.
+      const question = params.question ?? params.message ?? 'Ho bisogno di una tua indicazione per continuare.';
+      sendUpdate(`❓ ${question}`, 'ask_user');
+      const reply = await waitForUserReply();
+      if (reply === null || shouldStop) return 'L\'utente ha interrotto la sessione.';
+      return `[RISPOSTA UTENTE]: ${reply}`;
+    }
     case 'execute_js': {
       // Esegue JavaScript arbitrario nella pagina — come javascript_tool di Claude
       // Utile per: estrarre titoli prodotti, interagire con Select2/Chosen,
@@ -598,6 +835,68 @@ async function executeAction(cdp, action, params, referenceImage = null) {
       const amt = params.amount ?? 300;
       await cdp.scrollWithin(sel, dir, amt);
       return `Scrollato dentro "${sel}" verso ${dir} di ${amt}px`;
+    }
+    case 'mark_page': {
+      // SET-OF-MARKS: numera visivamente gli elementi cliccabili e restituisce
+      // screenshot (badge viola) + lista testuale — funziona con TUTTI i modelli
+      const list = await cdp.markPage();
+      let shot = null;
+      try {
+        shot = await cdp.screenshot();
+        chrome.runtime.sendMessage({ type: 'AGENT_UPDATE', updateType: 'screenshot', data: shot });
+      } catch {}
+      // Togli i badge dopo lo screenshot (i riferimenti agli elementi restano per click_element)
+      await cdp.unmarkPage();
+      return {
+        text: `ELEMENTI NUMERATI (Set-of-Marks) — clicca con click_element(n):\n${list}\n\n⚠️ I numeri restano validi finché non navighi o scrolli: dopo, richiama mark_page.`,
+        screenshot: shot
+      };
+    }
+    case 'click_element': {
+      const num = parseInt(params.n ?? params.number ?? params.element ?? 0);
+      if (!num) return 'ERRORE: parametro "n" mancante — usa il numero dell\'elemento da mark_page';
+      const desc = await cdp.clickMark(num);
+      await cdp.waitForLoad(4000);
+      await sleep(400);
+      try { await chrome.debugger.sendCommand({ tabId: cdp.tabId }, 'Runtime.enable', {}); } catch {}
+      let afterContent = '';
+      try { afterContent = (await cdp.readPage()).substring(0, 2000); } catch {}
+      const currentUrl = await cdp.getUrl().catch(() => '');
+      let shot = null;
+      try {
+        shot = await cdp.screenshot();
+        chrome.runtime.sendMessage({ type: 'AGENT_UPDATE', updateType: 'screenshot', data: shot });
+      } catch {}
+      return {
+        text: `Cliccato elemento [${num}] "${desc}"\nURL attuale: ${currentUrl}\n\n[STATO PAGINA]\n${afterContent}\n\n⚠️ VERIFICA nello screenshot l'effetto del click. I numeri di mark_page ora NON sono più validi.`,
+        screenshot: shot
+      };
+    }
+    case 'zoom': {
+      // Screenshot ingrandito di una regione — per leggere testo piccolo
+      const zx = parseInt(params.x ?? 0);
+      const zy = parseInt(params.y ?? 0);
+      const zw = parseInt(params.width ?? 600);
+      const zh = parseInt(params.height ?? 400);
+      const img = await cdp.zoomScreenshot(zx, zy, zw, zh);
+      chrome.runtime.sendMessage({ type: 'AGENT_UPDATE', updateType: 'screenshot', data: img });
+      return {
+        text: `Zoom sulla regione (${zx},${zy}) ${zw}x${zh}px — screenshot ingrandito allegato: leggi i dettagli (prezzi, codici, testo piccolo).`,
+        screenshot: img
+      };
+    }
+    case 'read_console':
+      // Messaggi console del browser (errori JS, warning) — analisi tecnica
+      return cdp.readConsole();
+    case 'read_network':
+      // Riepilogo richieste di rete (XHR/fetch, script, errori) — analisi tecnica
+      return cdp.readNetwork();
+    case 'press_key': {
+      const keyName = params.key ?? params.name ?? '';
+      await cdp.pressKey(keyName);
+      await sleep(400);
+      const urlAfter = await cdp.getUrl().catch(() => '');
+      return `Premuto tasto "${keyName}"\nURL attuale: ${urlAfter}`;
     }
     case 'read_page':
       return await cdp.readPage();
@@ -763,7 +1062,8 @@ async function runAutomation(automation) {
       tab.id,
       'auto',
       null,
-      null
+      null,
+      { useMemory: false }   // le automazioni non toccano la memoria della chat
     );
   } finally {
     currentAutoId = null;
