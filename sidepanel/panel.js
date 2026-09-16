@@ -16,13 +16,18 @@ let attachedImage = null;         // base64 data URL
 let currentSession = [];          // messaggi sessione corrente (per salvataggio)
 let awaitingReply  = false;       // true quando l'agente ha fatto una domanda (ask_user)
 
-// Modelli che supportano analisi immagini (vision/multimodal)
+// Modelli che supportano analisi immagini (vision/multimodal).
+// Aggiornato il 27/08/2026: aggiunti qwen3.5/3.6/3.8 e i cloud multimodali
+// (glm-5.3, kimi-k2.6/k3, minimax-m3). Le voci diggio-balanced e diggio-fast
+// sono state rimosse: quei modelli non esistono piu' sul VPS.
 const VISION_MODELS = [
   'gpt-4o','gpt-4-turbo','gpt-4-vision','claude-3','claude-opus','claude-sonnet',
   'llama-3.2','llama3.2','gemma4','gemma3','gemma-3',
   'llama-3.2-90b-vision','llama-3.2-11b-vision',
   'llava','bakllava','moondream','minicpm-v','qwen-vl','qwen2-vl',
-  'diggio-web','diggio-balanced','diggio-fast'
+  'qwen3.5','qwen3.6','qwen3.8',
+  'glm-5.3','kimi-k2.6','kimi-k2.7','kimi-k3','minimax-m3',
+  'diggio-web'
 ];
 
 function isVisionModel(modelId = '') {

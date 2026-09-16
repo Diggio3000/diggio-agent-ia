@@ -15,10 +15,12 @@ const VISION_MODELS = [
   'llama-3.2-90b-vision', 'llama-3.2-11b-vision',
   // Multimodal open source
   'llava', 'bakllava', 'moondream', 'minicpm-v',
-  // Qwen vision
-  'qwen-vl', 'qwen2-vl', 'qwen3.6',
+  // Qwen vision (3.5, 3.6 e 3.8 hanno vision nativa)
+  'qwen-vl', 'qwen2-vl', 'qwen3.5', 'qwen3.6', 'qwen3.8',
+  // Cloud multimodali (aggiunti 27/08/2026)
+  'glm-5.3', 'kimi-k2.6', 'kimi-k2.7', 'kimi-k3', 'minimax-m3',
   // Modelli Diggio basati su Gemma4
-  'diggio-web', 'diggio-balanced', 'diggio-fast',
+  'diggio-web',
 ];
 
 export { VISION_MODELS };
