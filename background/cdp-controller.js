@@ -1,10 +1,11 @@
+import { abortableSleep, redact } from '../shared/safety.js';
 // background/cdp-controller.js
 // Controlla il browser tramite Chrome DevTools Protocol
 
 export class CDPController {
-
-  constructor(tabId) {
-    this.tabId    = tabId;
+  constructor(tabId, signal) {
+    this.signal = signal;
+    this.tabId = tabId;
     this.attached = false;
     // Buffer console e rete — riempiti dagli eventi CDP mentre l'agente è connesso
     this.consoleBuf = [];
@@ -21,11 +22,19 @@ export class CDPController {
       if (!e.message?.toLowerCase().includes('already')) throw e;
     }
     this.attached = true;
-    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable', {}); } catch {}
-    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.enable', {}); } catch {}
+    try {
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable', {});
+    } catch {}
+    try {
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.enable', {});
+    } catch {}
     // Domini per analisi tecnica: console del browser + richieste di rete
-    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable', {}); } catch {}
-    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Network.enable', {}); } catch {}
+    try {
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable', {});
+    } catch {}
+    try {
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Network.enable', {});
+    } catch {}
     this._installEventListener();
   }
 
@@ -35,7 +44,9 @@ export class CDPController {
       this._eventHandler = null;
     }
     if (!this.attached) return;
-    try { await chrome.debugger.detach({ tabId: this.tabId }); } catch {}
+    try {
+      await chrome.debugger.detach({ tabId: this.tabId });
+    } catch {}
     this.attached = false;
   }
 
@@ -46,20 +57,27 @@ export class CDPController {
       if (source.tabId !== this.tabId) return;
       try {
         if (method === 'Runtime.consoleAPICalled') {
-          const text = (params.args || []).map(a => a.value ?? a.description ?? '').join(' ');
+          const text = (params.args || []).map((a) => a.value ?? a.description ?? '').join(' ');
           this._pushConsole(params.type, text);
         } else if (method === 'Log.entryAdded') {
           const e = params.entry || {};
           this._pushConsole(e.level, `${e.text ?? ''}${e.url ? ' — ' + e.url : ''}`);
         } else if (method === 'Network.requestWillBeSent') {
-          if (this.networkMap.size >= 400) return; // cap memoria
+          if (this.networkMap.size >= 400)
+            this.networkMap.delete(this.networkMap.keys().next().value);
           this.networkMap.set(params.requestId, {
-            url: params.request?.url ?? '', method: params.request?.method ?? 'GET',
-            type: params.type ?? '', status: null, error: null
+            url: redact(params.request?.url ?? ''),
+            method: params.request?.method ?? 'GET',
+            type: params.type ?? '',
+            status: null,
+            error: null
           });
         } else if (method === 'Network.responseReceived') {
           const e = this.networkMap.get(params.requestId);
-          if (e) { e.status = params.response?.status ?? null; e.type = params.type ?? e.type; }
+          if (e) {
+            e.status = params.response?.status ?? null;
+            e.type = params.type ?? e.type;
+          }
         } else if (method === 'Network.loadingFailed') {
           const e = this.networkMap.get(params.requestId);
           if (e) e.error = params.errorText ?? 'failed';
@@ -70,7 +88,7 @@ export class CDPController {
   }
 
   _pushConsole(level, text) {
-    const clean = (text ?? '').trim().substring(0, 300);
+    const clean = redact(text).trim().substring(0, 300);
     if (!clean) return;
     this.consoleBuf.push({ level: level || 'log', text: clean });
     if (this.consoleBuf.length > 150) this.consoleBuf.shift();
@@ -84,12 +102,23 @@ export class CDPController {
   }
 
   async cmd(method, params = {}) {
+    this.signal?.throwIfAborted();
     try {
-      return await chrome.debugger.sendCommand({ tabId: this.tabId }, method, params);
+      const value = await chrome.debugger.sendCommand({ tabId: this.tabId }, method, params);
+      if (value?.exceptionDetails)
+        throw new Error(
+          value.exceptionDetails.exception?.description ||
+            value.exceptionDetails.text ||
+            'Errore JavaScript nella pagina'
+        );
+      return value;
     } catch (e) {
       const msg = (e?.message ?? '').toLowerCase();
-      const isDetached = msg.includes('not attached') || msg.includes('detached')
-                      || msg.includes('no target')    || msg.includes('cannot access');
+      const isDetached =
+        msg.includes('not attached') ||
+        msg.includes('detached') ||
+        msg.includes('no target') ||
+        msg.includes('cannot access');
       if (isDetached) {
         // Riconnessione automatica — accade spesso dopo redirect post-form
         try {
@@ -105,44 +134,64 @@ export class CDPController {
 
   // Naviga verso URL e attende caricamento
   async navigate(url) {
-    await this.cmd('Page.navigate', { url });
-    await this.waitForLoad();
+    const [, result] = await Promise.all([this.waitForLoad(), this.cmd('Page.navigate', { url })]);
+    if (result.errorText) throw new Error('Navigazione fallita: ' + result.errorText);
+    this.signal?.throwIfAborted();
     // Dopo ogni navigazione ri-abilita i domini CDP (la pagina si è ricaricata)
-    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable', {}); } catch {}
-    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.enable', {}); } catch {}
-    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable', {}); } catch {}
-    try { await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Network.enable', {}); } catch {}
+    try {
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Page.enable', {});
+    } catch {}
+    try {
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.enable', {});
+    } catch {}
+    try {
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Log.enable', {});
+    } catch {}
+    try {
+      await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Network.enable', {});
+    } catch {}
   }
 
   // Attende che la pagina finisca di caricarsi (con fallback su timeout)
   waitForLoad(timeout = 10000) {
-    return new Promise((resolve) => {
-      const timer = setTimeout(() => {
+    return new Promise((resolve, reject) => {
+      let timer;
+      const cleanup = () => {
+        clearTimeout(timer);
         chrome.debugger.onEvent.removeListener(handler);
-        resolve(); // timeout non bloccante — continua comunque
-      }, timeout);
-      const handler = (source, event) => {
-        if (source.tabId === this.tabId && event === 'Page.loadEventFired') {
-          clearTimeout(timer);
-          chrome.debugger.onEvent.removeListener(handler);
-          // Piccola pausa extra per JS post-load
-          setTimeout(resolve, 400);
-        }
+        this.signal?.removeEventListener('abort', cancel);
       };
+      const cancel = () => {
+        cleanup();
+        reject(this.signal.reason || new DOMException('Interrotto', 'AbortError'));
+      };
+      const done = () => {
+        cleanup();
+        resolve();
+      };
+      const handler = (source, event) => {
+        if (source.tabId === this.tabId && event === 'Page.loadEventFired') done();
+      };
+      if (this.signal?.aborted) {
+        reject(this.signal.reason);
+        return;
+      }
       chrome.debugger.onEvent.addListener(handler);
+      this.signal?.addEventListener('abort', cancel, { once: true });
+      timer = setTimeout(done, timeout);
     });
   }
 
   // Click tramite CSS selector
   async click(selector) {
-    const escaped = selector.replace(/'/g, "\\'");
+    const escaped = JSON.stringify(selector);
     const result = await this.cmd('Runtime.evaluate', {
       expression: `
         (function() {
-          const el = document.querySelector('${escaped}');
-          if (!el) return { ok: false, error: 'Elemento non trovato: ${escaped}' };
+          const el = document.querySelector(${escaped});
+          if (!el) return { ok: false, error: 'Elemento non trovato' };
           const r = el.getBoundingClientRect();
-          if (r.width === 0) return { ok: false, error: 'Elemento non visibile: ${escaped}' };
+          if (r.width === 0) return { ok: false, error: 'Elemento non visibile' };
           return { ok: true, x: r.left + r.width/2, y: r.top + r.height/2 };
         })()
       `,
@@ -153,28 +202,36 @@ export class CDPController {
     if (!val.ok) throw new Error(val.error);
 
     await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mousePressed', x: val.x, y: val.y, button: 'left', clickCount: 1
+      type: 'mousePressed',
+      x: val.x,
+      y: val.y,
+      button: 'left',
+      clickCount: 1
     });
     await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mouseReleased', x: val.x, y: val.y, button: 'left', clickCount: 1
+      type: 'mouseReleased',
+      x: val.x,
+      y: val.y,
+      button: 'left',
+      clickCount: 1
     });
     await this.sleep(500);
   }
 
   // Click per testo visibile
   async clickByText(text) {
-    const escaped = text.replace(/'/g, "\\'");
+    const escaped = JSON.stringify(text.toLowerCase());
     const result = await this.cmd('Runtime.evaluate', {
       expression: `
         (function() {
           const all = document.querySelectorAll('a,button,input[type=submit],[role=button],label');
           for (const el of all) {
-            if (el.textContent.trim().toLowerCase().includes('${escaped.toLowerCase()}')) {
+            if (el.textContent.trim().toLowerCase().includes(${escaped})) {
               const r = el.getBoundingClientRect();
               if (r.width > 0) return { ok: true, x: r.left + r.width/2, y: r.top + r.height/2 };
             }
           }
-          return { ok: false, error: 'Testo non trovato: ${escaped}' };
+          return { ok: false, error: 'Testo non trovato' };
         })()
       `,
       returnByValue: true
@@ -184,41 +241,45 @@ export class CDPController {
     if (!val.ok) throw new Error(val.error);
 
     await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mousePressed', x: val.x, y: val.y, button: 'left', clickCount: 1
+      type: 'mousePressed',
+      x: val.x,
+      y: val.y,
+      button: 'left',
+      clickCount: 1
     });
     await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mouseReleased', x: val.x, y: val.y, button: 'left', clickCount: 1
+      type: 'mouseReleased',
+      x: val.x,
+      y: val.y,
+      button: 'left',
+      clickCount: 1
     });
     await this.sleep(500);
   }
 
   // Digita testo in un campo
   async typeText(selector, text) {
-    const escaped = selector.replace(/'/g, "\\'");
-
-    await this.cmd('Runtime.evaluate', {
-      expression: `
-        (function() {
-          const el = document.querySelector('${escaped}');
-          if (!el) return false;
-          el.focus();
-          el.value = '';
-          el.dispatchEvent(new Event('input', {bubbles:true}));
-          return true;
-        })()
-      `,
+    const target = JSON.stringify(selector);
+    const focused = await this.cmd('Runtime.evaluate', {
+      expression: `(function() {
+        const el = document.querySelector(${target});
+        if (!el || el.disabled || el.readOnly || !el.getClientRects().length) return false;
+        if (el.type === 'password' || /password|cc-number|cc-csc|one-time-code/.test(el.autocomplete || '')) throw new Error('Compila manualmente questo campo riservato.');
+        if (!['INPUT','TEXTAREA'].includes(el.tagName) && !el.isContentEditable) return false;
+        el.focus();
+        if (document.activeElement !== el) return false;
+        if (el.isContentEditable) el.textContent = '';
+        else { const setter = Object.getOwnPropertyDescriptor(el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value').set; setter.call(el, ''); }
+        el.dispatchEvent(new Event('input', {bubbles:true}));
+        return true;
+      })()`,
       returnByValue: true
     });
-
-    await this.sleep(200);
-
-    for (const char of text) {
-      await this.cmd('Input.dispatchKeyEvent', { type: 'char', text: char });
-      await this.sleep(30);
-    }
-
+    if (!focused?.result?.value)
+      throw new Error('Campo assente o non modificabile: nessun testo inserito.');
+    await this.cmd('Input.insertText', { text });
     await this.cmd('Runtime.evaluate', {
-      expression: `document.querySelector('${escaped}')?.dispatchEvent(new Event('change', {bubbles:true}))`
+      expression: `document.querySelector(${target})?.dispatchEvent(new Event('change', {bubbles:true}))`
     });
   }
 
@@ -441,7 +502,8 @@ export class CDPController {
         // 1. Testo visibile — rimuovi elementi non utili per risparmiare spazio
         const body = document.body.cloneNode(true);
         body.querySelectorAll('script,style,noscript').forEach(e => e.remove());
-        const pageText = body.innerText.replace(/\\s{3,}/g, '\\n\\n').trim().substring(0, 3500);
+        body.querySelectorAll('input,textarea,[contenteditable]').forEach(e => e.remove());
+        const pageText = body.textContent.replace(/\\s{3,}/g, '\\n\\n').trim().substring(0, 3500);
 
         // 2. TUTTI i link dal sorgente — come fare "Visualizza sorgente" e cercare <a href>
         // a.href nel DOM live è già assoluto (il browser risolve i path relativi)
@@ -461,7 +523,7 @@ export class CDPController {
 
         return pageText +
           '\\n\\n=== LINK PAGINA (da sorgente HTML — usa questi URL, non costruirne di nuovi) ===\\n' +
-          links.join('\\n');
+          links.slice(0, 100).join('\\n').substring(0, 10000);
       })()`,
       returnByValue: true
     });
@@ -472,9 +534,10 @@ export class CDPController {
   // Utile per estrarre dati dal DOM, cliccare elementi via JS, interagire con librerie
   // custom (Select2, Chosen, Vue, React, ecc.) che non rispondono ai metodi standard.
   async executeJs(code) {
-    const wrapped = `(function() { try { return JSON.stringify(eval(${JSON.stringify(code)})); } catch(e) { return 'ERRORE: ' + e.message; } })()`;
+    const wrapped = `(async function() { return JSON.stringify(await (0,eval)(${JSON.stringify(code)})); })()`;
     const result = await this.cmd('Runtime.evaluate', {
       expression: wrapped,
+      awaitPromise: true,
       returnByValue: true
     });
     const raw = result?.result?.value ?? 'null';
@@ -486,21 +549,29 @@ export class CDPController {
   // Utile per dropdown personalizzati, canvas, elementi non selezionabili via CSS.
   async clickCoords(x, y) {
     await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mousePressed', x, y, button: 'left', clickCount: 1
+      type: 'mousePressed',
+      x,
+      y,
+      button: 'left',
+      clickCount: 1
     });
     await this.sleep(80);
     await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mouseReleased', x, y, button: 'left', clickCount: 1
+      type: 'mouseReleased',
+      x,
+      y,
+      button: 'left',
+      clickCount: 1
     });
     await this.sleep(400);
   }
 
   // Scrolla all'interno di un elemento specifico (es. lista dropdown aperta)
   async scrollWithin(selector, direction = 'down', amount = 300) {
-    const escaped = selector.replace(/'/g, "\\'");
+    const escaped = JSON.stringify(selector);
     await this.cmd('Runtime.evaluate', {
       expression: `(function() {
-        const el = document.querySelector('${escaped}');
+        const el = document.querySelector(${escaped});
         if (el) el.scrollBy(0, ${direction === 'down' ? amount : -amount});
       })()`
     });
@@ -524,13 +595,14 @@ export class CDPController {
         window.__diggioMarks = [];
 
         const els = Array.from(document.querySelectorAll(
-          'a[href],button,input:not([type=hidden]),select,textarea,' +
+          'a[href],button,input:not([type=hidden]):not([type=password]),select,textarea,' +
           '[role=button],[role=link],[role=tab],[role=menuitem],[role=combobox],' +
           '[role=checkbox],[role=radio],[role=option],[onclick],summary'
         ));
         const out = [];
         let n = 0;
         for (const el of els) {
+          if (/password|cc-number|cc-csc|one-time-code/.test(el.autocomplete || '')) continue;
           if (n >= 120) break;
           const r = el.getBoundingClientRect();
           // Solo elementi visibili nella viewport corrente
@@ -561,7 +633,7 @@ export class CDPController {
           document.body.appendChild(box);
 
           const tag = el.tagName.toLowerCase();
-          const text = (el.textContent || el.value || el.placeholder ||
+          const text = ((['INPUT','TEXTAREA'].includes(el.tagName) ? '' : el.textContent) || el.placeholder ||
                         el.getAttribute('aria-label') || el.title || '')
                         .trim().replace(/\\s+/g, ' ').substring(0, 60);
           const href = el.href ? '  →  ' + el.href.substring(0, 90) : '';
@@ -594,7 +666,7 @@ export class CDPController {
         const r = el.getBoundingClientRect();
         if (r.width === 0) return { ok: false, error: 'Elemento [${parseInt(n)}] non più visibile' };
         return { ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2,
-                 desc: (el.textContent || el.value || '').trim().substring(0, 50) };
+                 desc: (['INPUT','TEXTAREA'].includes(el.tagName) ? (el.placeholder || el.type) : el.textContent || '').trim().substring(0, 50) };
       })()`,
       returnByValue: true
     });
@@ -618,20 +690,19 @@ export class CDPController {
       expression: `JSON.stringify({sx: window.scrollX, sy: window.scrollY, vw: innerWidth, vh: innerHeight})`,
       returnByValue: true
     });
-    const { sx, sy, vw, vh } = JSON.parse(off?.result?.value ?? '{"sx":0,"sy":0,"vw":1280,"vh":800}');
+    const { sx, sy, vw, vh } = JSON.parse(
+      off?.result?.value ?? '{"sx":0,"sy":0,"vw":1280,"vh":800}'
+    );
     const w = Math.max(100, Math.min(width, vw));
     const h = Math.max(100, Math.min(height, vh));
     const cx = Math.max(0, Math.min(x, vw - w));
     const cy = Math.max(0, Math.min(y, vh - h));
     const scale = Math.min(3, Math.max(1.5, 1200 / w)); // ingrandimento 1.5x–3x
 
-    const result = await this.cmd('Page.captureScreenshot', {
-      format: 'jpeg',
-      quality: 85,
+    return this.screenshot({
       captureBeyondViewport: true,
       clip: { x: sx + cx, y: sy + cy, width: w, height: h, scale }
     });
-    return result.data;
   }
 
   // ══════════════════════════════════════════════════════════
@@ -642,16 +713,20 @@ export class CDPController {
   // Messaggi console registrati da quando l'agente è connesso
   readConsole() {
     if (this.consoleBuf.length === 0) {
-      return 'Nessun messaggio in console da quando l\'agente è connesso. Se hai già navigato/ricaricato la pagina in questa sessione, significa che la pagina NON produce errori né warning (buon segno per la qualità del sito) — NON serve ricaricare di nuovo, prosegui con l\'analisi.';
+      return "Nessun messaggio in console da quando l'agente è connesso. Se hai già navigato/ricaricato la pagina in questa sessione, significa che la pagina NON produce errori né warning (buon segno per la qualità del sito) — NON serve ricaricare di nuovo, prosegui con l'analisi.";
     }
-    const errors = this.consoleBuf.filter(e => e.level === 'error');
-    const warns  = this.consoleBuf.filter(e => e.level === 'warning' || e.level === 'warn');
-    const others = this.consoleBuf.filter(e => !errors.includes(e) && !warns.includes(e));
-    const fmt = (list, max) => list.slice(-max).map(e => `  [${e.level}] ${e.text}`).join('\n');
+    const errors = this.consoleBuf.filter((e) => e.level === 'error');
+    const warns = this.consoleBuf.filter((e) => e.level === 'warning' || e.level === 'warn');
+    const others = this.consoleBuf.filter((e) => !errors.includes(e) && !warns.includes(e));
+    const fmt = (list, max) =>
+      list
+        .slice(-max)
+        .map((e) => `  [${e.level}] ${e.text}`)
+        .join('\n');
 
     let out = `CONSOLE BROWSER (${this.consoleBuf.length} messaggi da inizio sessione):\n`;
     if (errors.length) out += `\n❌ ERRORI (${errors.length}):\n` + fmt(errors, 20) + '\n';
-    if (warns.length)  out += `\n⚠️ WARNING (${warns.length}):\n` + fmt(warns, 12) + '\n';
+    if (warns.length) out += `\n⚠️ WARNING (${warns.length}):\n` + fmt(warns, 12) + '\n';
     if (others.length) out += `\nℹ️ LOG (${others.length}, ultimi 10):\n` + fmt(others, 10);
     return out.substring(0, 3200);
   }
@@ -660,29 +735,52 @@ export class CDPController {
   readNetwork() {
     const reqs = Array.from(this.networkMap.values());
     if (reqs.length === 0) {
-      return 'Nessuna richiesta di rete registrata da quando l\'agente è connesso. Naviga/ricarica la pagina per catturare il traffico di caricamento, poi rileggi.';
+      return "Nessuna richiesta di rete registrata da quando l'agente è connesso. Naviga/ricarica la pagina per catturare il traffico di caricamento, poi rileggi.";
     }
     // Fallita = status HTTP >= 400, oppure errore di rete SENZA alcuna risposta ricevuta.
     // (I beacon analytics con 204 + connessione chiusa NON sono errori)
-    const failed = reqs.filter(r => (r.status && r.status >= 400) || (r.error && !r.status));
-    const xhr    = reqs.filter(r => r.type === 'XHR' || r.type === 'Fetch');
-    const scripts = reqs.filter(r => r.type === 'Script');
+    const failed = reqs.filter((r) => (r.status && r.status >= 400) || (r.error && !r.status));
+    const xhr = reqs.filter((r) => r.type === 'XHR' || r.type === 'Fetch');
+    const scripts = reqs.filter((r) => r.type === 'Script');
     const byType = {};
-    reqs.forEach(r => { byType[r.type || 'Altro'] = (byType[r.type || 'Altro'] ?? 0) + 1; });
-    const host = u => { try { return new URL(u).hostname; } catch { return u.substring(0, 40); } };
+    reqs.forEach((r) => {
+      byType[r.type || 'Altro'] = (byType[r.type || 'Altro'] ?? 0) + 1;
+    });
+    const host = (u) => {
+      try {
+        return new URL(u).hostname;
+      } catch {
+        return u.substring(0, 40);
+      }
+    };
 
     let out = `RICHIESTE DI RETE (${reqs.length} da inizio sessione):\n`;
-    out += 'Per tipo: ' + Object.entries(byType).map(([t, n]) => `${t}:${n}`).join(', ') + '\n';
+    out +=
+      'Per tipo: ' +
+      Object.entries(byType)
+        .map(([t, n]) => `${t}:${n}`)
+        .join(', ') +
+      '\n';
     if (failed.length) {
-      out += `\n❌ FALLITE / ERRORI (${failed.length}):\n` +
-        failed.slice(-15).map(r => `  [${r.status ?? r.error}] ${r.method} ${r.url.substring(0, 110)}`).join('\n') + '\n';
+      out +=
+        `\n❌ FALLITE / ERRORI (${failed.length}):\n` +
+        failed
+          .slice(-15)
+          .map((r) => `  [${r.status ?? r.error}] ${r.method} ${r.url.substring(0, 110)}`)
+          .join('\n') +
+        '\n';
     }
     if (xhr.length) {
-      out += `\n📡 CHIAMATE XHR/FETCH (${xhr.length}, ultime 20):\n` +
-        xhr.slice(-20).map(r => `  [${r.status ?? '…'}] ${r.method} ${r.url.substring(0, 110)}`).join('\n') + '\n';
+      out +=
+        `\n📡 CHIAMATE XHR/FETCH (${xhr.length}, ultime 20):\n` +
+        xhr
+          .slice(-20)
+          .map((r) => `  [${r.status ?? '…'}] ${r.method} ${r.url.substring(0, 110)}`)
+          .join('\n') +
+        '\n';
     }
     if (scripts.length) {
-      const domains = [...new Set(scripts.map(r => host(r.url)))].slice(0, 15);
+      const domains = [...new Set(scripts.map((r) => host(r.url)))].slice(0, 15);
       out += `\n📜 SCRIPT (${scripts.length}) da domini: ${domains.join(', ')}`;
     }
     return out.substring(0, 3200);
@@ -691,27 +789,42 @@ export class CDPController {
   // Preme un tasto della tastiera (Enter, Escape, frecce, ecc.)
   async pressKey(name) {
     const KEYS = {
-      enter:      { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
-      tab:        { key: 'Tab', code: 'Tab', keyCode: 9 },
-      escape:     { key: 'Escape', code: 'Escape', keyCode: 27 },
-      esc:        { key: 'Escape', code: 'Escape', keyCode: 27 },
-      backspace:  { key: 'Backspace', code: 'Backspace', keyCode: 8 },
-      delete:     { key: 'Delete', code: 'Delete', keyCode: 46 },
-      space:      { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
-      arrowdown:  { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
-      arrowup:    { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
-      arrowleft:  { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+      enter: { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
+      tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
+      escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
+      esc: { key: 'Escape', code: 'Escape', keyCode: 27 },
+      backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+      delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
+      space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
+      arrowdown: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+      arrowup: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+      arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
       arrowright: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
-      pagedown:   { key: 'PageDown', code: 'PageDown', keyCode: 34 },
-      pageup:     { key: 'PageUp', code: 'PageUp', keyCode: 33 },
-      home:       { key: 'Home', code: 'Home', keyCode: 36 },
-      end:        { key: 'End', code: 'End', keyCode: 35 },
+      pagedown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
+      pageup: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+      home: { key: 'Home', code: 'Home', keyCode: 36 },
+      end: { key: 'End', code: 'End', keyCode: 35 }
     };
     const k = KEYS[(name ?? '').toLowerCase().replace(/[\s_-]/g, '')];
-    if (!k) throw new Error(`Tasto non supportato: "${name}" — usa: Enter, Tab, Escape, Space, Backspace, Delete, ArrowDown/Up/Left/Right, PageDown/Up, Home, End`);
-    await this.cmd('Input.dispatchKeyEvent', { type: 'rawKeyDown', windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode, key: k.key, code: k.code });
+    if (!k)
+      throw new Error(
+        `Tasto non supportato: "${name}" — usa: Enter, Tab, Escape, Space, Backspace, Delete, ArrowDown/Up/Left/Right, PageDown/Up, Home, End`
+      );
+    await this.cmd('Input.dispatchKeyEvent', {
+      type: 'rawKeyDown',
+      windowsVirtualKeyCode: k.keyCode,
+      nativeVirtualKeyCode: k.keyCode,
+      key: k.key,
+      code: k.code
+    });
     if (k.text) await this.cmd('Input.dispatchKeyEvent', { type: 'char', text: k.text });
-    await this.cmd('Input.dispatchKeyEvent', { type: 'keyUp', windowsVirtualKeyCode: k.keyCode, nativeVirtualKeyCode: k.keyCode, key: k.key, code: k.code });
+    await this.cmd('Input.dispatchKeyEvent', {
+      type: 'keyUp',
+      windowsVirtualKeyCode: k.keyCode,
+      nativeVirtualKeyCode: k.keyCode,
+      key: k.key,
+      code: k.code
+    });
     await this.sleep(300);
   }
 
@@ -725,11 +838,24 @@ export class CDPController {
   }
 
   // Screenshot base64
-  async screenshot() {
-    const result = await this.cmd('Page.captureScreenshot', {
-      format: 'jpeg', quality: 75
+  async screenshot(options = {}) {
+    await this.cmd('Runtime.evaluate', {
+      expression: `document.querySelectorAll('input[type=password],input[autocomplete=cc-number],input[autocomplete=cc-csc],input[autocomplete=one-time-code]').forEach(el => { el.dataset.diggioVisibility = el.style.visibility; el.style.visibility = 'hidden'; })`
     });
-    return result.data;
+    try {
+      const result = await this.cmd('Page.captureScreenshot', {
+        format: 'jpeg',
+        quality: 65,
+        ...options
+      });
+      return result.data;
+    } finally {
+      try {
+        await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.evaluate', {
+          expression: `document.querySelectorAll('[data-diggio-visibility]').forEach(el => { el.style.visibility = el.dataset.diggioVisibility; delete el.dataset.diggioVisibility; })`
+        });
+      } catch {}
+    }
   }
 
   // Scroll
@@ -742,6 +868,6 @@ export class CDPController {
   }
 
   sleep(ms) {
-    return new Promise(r => setTimeout(r, ms));
+    return abortableSleep(ms, this.signal);
   }
 }

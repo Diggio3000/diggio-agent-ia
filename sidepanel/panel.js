@@ -1,779 +1,628 @@
-// sidepanel/panel.js
+import {
+  PRESETS,
+  chatEndpoint,
+  modelsEndpoint,
+  normalizeModels,
+  headersFor,
+  requestJson,
+  loadSettings,
+  supportsVision
+} from '../shared/providers.js';
+import { DiggioClient } from '../background/diggio-client.js';
+import { esc, renderText, csvCell } from '../shared/render.js';
 
-const $ = id => document.getElementById(id);
-
-// Versione letta dinamicamente dal manifest
-const { version } = chrome.runtime.getManifest();
-document.addEventListener('DOMContentLoaded', () => {
-  const el = $('footerVersion');
-  if (el) el.textContent = `v${version}`;
-});
-
-let agentRunning  = false;
-let currentMode   = 'auto';       // 'auto' | 'ask_first'
-let selectedTabId = null;
-let attachedImage = null;         // base64 data URL
-let currentSession = [];          // messaggi sessione corrente (per salvataggio)
-let awaitingReply  = false;       // true quando l'agente ha fatto una domanda (ask_user)
-
-// Modelli che supportano analisi immagini (vision/multimodal).
-// Aggiornato il 27/08/2026: aggiunti qwen3.5/3.6/3.8 e i cloud multimodali
-// (glm-5.3, kimi-k2.6/k3, minimax-m3). Le voci diggio-balanced e diggio-fast
-// sono state rimosse: quei modelli non esistono piu' sul VPS.
-const VISION_MODELS = [
-  'gpt-4o','gpt-4-turbo','gpt-4-vision','claude-3','claude-opus','claude-sonnet',
-  'llama-3.2','llama3.2','gemma4','gemma3','gemma-3',
-  'llama-3.2-90b-vision','llama-3.2-11b-vision',
-  'llava','bakllava','moondream','minicpm-v','qwen-vl','qwen2-vl',
-  'qwen3.5','qwen3.6','qwen3.8',
-  'glm-5.3','kimi-k2.6','kimi-k2.7','kimi-k3','minimax-m3',
-  'diggio-web'
+const $ = (id) => document.getElementById(id);
+let agentRunning = false,
+  awaitingReply = false,
+  currentSession = [],
+  selectedTabId = null,
+  attachedImage = null;
+let currentMode = 'chat',
+  activeState = {},
+  profiles = {},
+  currentProvider = 'openai',
+  settings = {};
+const DRAWERS = [
+  'settingsPanel',
+  'tabsPanel',
+  'historyPanel',
+  'templatesPanel',
+  'toolsPanel',
+  'automationsPanel',
+  'guidePanel'
 ];
-
-function isVisionModel(modelId = '') {
-  return VISION_MODELS.some(vm => modelId.toLowerCase().startsWith(vm.toLowerCase()));
+async function rpc(message) {
+  const result = await chrome.runtime.sendMessage(message);
+  if (result?.error) throw new Error(result.error);
+  return result;
 }
-
-function updateVisionWarning() {
-  const warn = $('visionWarning');
-  if (!warn) return;
-  const model = $('modelManual')?.value ?? $('modelSelect')?.value ?? '';
-  if (attachedImage && !isVisionModel(model)) {
-    warn.classList.remove('hidden');
-  } else {
-    warn.classList.add('hidden');
-  }
+function showError(error) {
+  $('appNotice').textContent = error.message || String(error);
+  $('appNotice').hidden = false;
 }
-
-// Preset endpoint per provider
-const PROVIDER_PRESETS = {
-  openai:       'https://api.openai.com/v1/chat/completions',
-  anthropic:    'https://api.anthropic.com/v1/messages',
-  groq:         'https://api.groq.com/openai/v1/chat/completions',
-  openrouter:   'https://openrouter.ai/api/v1/chat/completions',
-  perplexity:   'https://api.perplexity.ai/chat/completions',
-  ollama:       'http://localhost:11434/v1/chat/completions',
-  ollama_cloud: 'https://ollama.com/v1/chat/completions',
-  lmstudio:     'http://localhost:1234/v1/chat/completions',
-  custom:       ''
-};
-
-// ── Impostazioni ─────────────────────────────────────────────
-$('btnSettings').addEventListener('click', () => {
-  toggleDrawer('settingsPanel');
-});
-
-// Carica impostazioni salvate
-chrome.storage.sync.get(['apiKey', 'model', 'apiEndpoint', 'provider', 'nativeTools'], ({ apiKey, model, apiEndpoint, provider, nativeTools }) => {
-  if (apiKey)      $('apiKey').value      = apiKey;
-  if (model)       $('modelManual').value = model;
-  if (apiEndpoint) $('apiEndpoint').value = apiEndpoint;
-  $('nativeToolsCheck').checked = nativeTools === true;
-  if (provider)    $('providerSelect').value = provider;
-  else             $('providerSelect').value = 'openai';
-  // Se non c'è endpoint salvato, usa il preset del provider selezionato
-  if (!apiEndpoint) {
-    const prov = $('providerSelect').value;
-    $('apiEndpoint').value = PROVIDER_PRESETS[prov] ?? '';
-  }
-});
-
-// Cambio provider → aggiorna endpoint automaticamente
-$('providerSelect').addEventListener('change', () => {
-  const prov = $('providerSelect').value;
-  $('apiEndpoint').value = PROVIDER_PRESETS[prov] ?? '';
-});
-
-// Aggiorna avviso vision quando cambia modello
-$('modelManual').addEventListener('input', updateVisionWarning);
-
-// Modelli predefiniti per provider che non hanno un endpoint /models
-const PROVIDER_MODELS = {
-  anthropic: [
-    'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001',
-    'claude-3-5-sonnet-20241022', 'claude-3-5-haiku-20241022',
-    'claude-3-opus-20240229', 'claude-3-sonnet-20240229', 'claude-3-haiku-20240307'
-  ],
-  perplexity: [
-    'sonar-pro', 'sonar', 'sonar-reasoning-pro', 'sonar-reasoning',
-    'sonar-deep-research', 'r1-1776'
-  ]
-};
-
-// Carica modelli disponibili dall'endpoint
-$('btnLoadModels').addEventListener('click', async () => {
-  const endpoint   = $('apiEndpoint').value.trim();
-  const apiKey     = $('apiKey').value.trim();
-  const provider   = $('providerSelect').value;
-  const statusEl   = $('modelLoadStatus');
-  const selectEl   = $('modelSelect');
-  if (!endpoint) { statusEl.textContent = '❌ Inserisci prima l\'endpoint'; return; }
-
-  // Provider con lista predefinita (nessun endpoint /models)
-  if (PROVIDER_MODELS[provider]) {
-    populateModelSelect(selectEl, PROVIDER_MODELS[provider]);
-    statusEl.textContent = `✅ ${PROVIDER_MODELS[provider].length} modelli disponibili`;
+function clearNotice() {
+  $('appNotice').hidden = true;
+}
+function toggleDrawer(id) {
+  const opening = $(id).classList.contains('hidden');
+  DRAWERS.forEach((x) => $(x).classList.toggle('hidden', x !== id || !opening));
+  document
+    .querySelectorAll('[data-drawer]')
+    .forEach((b) => b.classList.toggle('selected', opening && b.dataset.drawer === id));
+  $('btnChat').classList.toggle('selected', !opening);
+  if (opening) $(id).querySelector('input,button,select,textarea')?.focus();
+}
+function closeDrawers() {
+  DRAWERS.forEach((x) => $(x).classList.add('hidden'));
+  document.querySelectorAll('[data-drawer]').forEach((b) => b.classList.remove('selected'));
+  $('btnChat').classList.add('selected');
+}
+function scrollToBottom() {
+  const el = $('messages');
+  el.scrollTop = el.scrollHeight;
+}
+function drawMessage(m) {
+  if (m.type === 'screenshot') {
+    drawScreenshot(m.data);
     return;
   }
-
-  // Ricava URL endpoint modelli (es: .../v1/chat/completions → .../v1/models)
-  const modelsUrl = endpoint
-    .replace(/\/chat\/completions\/?$/, '/models')
-    .replace(/\/messages\/?$/, '/models');
-  statusEl.textContent = '⏳ Caricamento modelli...';
-
-  // Headers: Anthropic usa x-api-key, tutti gli altri Bearer
-  const headers = { 'Content-Type': 'application/json' };
-  if (apiKey) {
-    if (provider === 'anthropic') {
-      headers['x-api-key'] = apiKey;
-      headers['anthropic-version'] = '2023-06-01';
-    } else {
-      headers['Authorization'] = `Bearer ${apiKey}`;
-    }
-  }
-
-  try {
-    const res = await fetch(modelsUrl, { headers });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const json = await res.json();
-    const models = (json.data ?? json.models ?? [])
-      .map(m => m.id ?? m)
-      .filter(Boolean)
-      .sort();
-    if (models.length === 0) throw new Error('Nessun modello trovato');
-
-    populateModelSelect(selectEl, models);
-    statusEl.textContent = `✅ ${models.length} modelli caricati`;
-  } catch (e) {
-    statusEl.textContent = `❌ ${hintForFetchError(e, endpoint)}`;
-  }
-});
-
-// Suggerimenti mirati per gli errori più comuni con endpoint locali
-function hintForFetchError(e, endpoint) {
-  const msg = e.message || String(e);
-  const isLocal = endpoint.includes('localhost') || endpoint.includes('127.0.0.1');
-  if (isLocal && endpoint.includes('11434')) {
-    return `${msg} — Ollama è avviato? Se sì, riavvialo con la variabile OLLAMA_ORIGINS=chrome-extension://* (oppure "*") per consentire l'accesso all'estensione`;
-  }
-  if (isLocal && endpoint.includes('1234')) {
-    return `${msg} — LM Studio è aperto con il server attivo? (Developer → Start Server, abilita CORS)`;
-  }
-  return msg;
-}
-
-function populateModelSelect(selectEl, models) {
-  selectEl.innerHTML = models.map(m => `<option value="${esc(m)}">${esc(m)}</option>`).join('');
-  selectEl.classList.remove('hidden');
-
-  // Preseleziona il modello già salvato se presente
-  const saved = $('modelManual').value;
-  if (saved && models.includes(saved)) selectEl.value = saved;
-
-  // Aggiorna modelManual quando si sceglie dal select (una sola volta)
-  selectEl.onchange = () => {
-    $('modelManual').value = selectEl.value;
-    updateVisionWarning();
+  if (!m.text) return;
+  const fold = ['thought', 'action', 'result'].includes(m.type);
+  const div = document.createElement(fold ? 'details' : 'article');
+  div.className = 'message ' + m.type;
+  const labels = {
+    user: 'Tu',
+    done: 'Diggio',
+    thought: 'Ragionamento',
+    action: 'Azione',
+    result: 'Osservazione',
+    error: 'Da verificare',
+    info: 'Stato'
   };
-}
-
-$('btnSaveSettings').addEventListener('click', async () => {
-  const apiKey      = $('apiKey').value.trim();
-  const model       = $('modelManual').value.trim();
-  const apiEndpoint = $('apiEndpoint').value.trim();
-  const provider    = $('providerSelect').value;
-  if (!apiKey)      { $('testResult').textContent = '❌ Inserisci la API Key!'; return; }
-  if (!model)       { $('testResult').textContent = '❌ Inserisci il nome del modello!'; return; }
-  if (!apiEndpoint) { $('testResult').textContent = '❌ Inserisci l\'endpoint API!'; return; }
-
-  const nativeTools = $('nativeToolsCheck').checked;
-  await chrome.storage.sync.set({ apiKey, model, apiEndpoint, provider, nativeTools });
-  $('testResult').textContent = '⏳ Test in corso...';
-
-  const controller = new AbortController();
-  const tid = setTimeout(() => controller.abort(), 30000);
-  try {
-    const res = await fetch(apiEndpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, messages: [{ role:'user', content:'Reply with just the word OK.' }], stream: false }),
-      signal: controller.signal
-    });
-    clearTimeout(tid);
-    const json = await res.json();
-    if (json.error) throw new Error(json.error.message ?? JSON.stringify(json.error));
-    const reply = json.choices?.[0]?.message?.content ?? '';
-    const cleaned = reply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
-    $('testResult').textContent = cleaned
-      ? `✅ ${model} — "${cleaned.substring(0, 40)}"`
-      : '⚠️ Risposta vuota (il modello funziona ma non risponde a messaggi brevi)';
-  } catch (e) {
-    clearTimeout(tid);
-    $('testResult').textContent = e.name === 'AbortError'
-      ? '⏱️ Timeout — il modello è lento. Potrebbe comunque funzionare per task complessi.'
-      : `❌ ${e.message}`;
-  }
-});
-
-// ── Modalità ─────────────────────────────────────────────────
-$('modeBtn').addEventListener('click', () => {
-  currentMode = currentMode === 'auto' ? 'ask_first' : 'auto';
-  const btn = $('modeBtn');
-  if (currentMode === 'auto') {
-    btn.textContent = '⚡ Auto';
-    btn.className = 'mode-btn mode-auto';
+  if (fold) {
+    const summary = document.createElement('summary');
+    summary.textContent = labels[m.type] + ' · ' + m.text.slice(0, 85);
+    div.append(summary);
   } else {
-    btn.textContent = '🔔 Chiedi prima';
-    btn.className = 'mode-btn mode-ask';
+    const label = document.createElement('div');
+    label.className = 'message-author';
+    label.textContent = labels[m.type] || 'Diggio';
+    div.append(label);
   }
-});
-
-// ── Schede ───────────────────────────────────────────────────
-$('btnTabs').addEventListener('click', () => {
-  toggleDrawer('tabsPanel');
-  if (!$('tabsPanel').classList.contains('hidden')) loadTabs();
-});
-
-$('btnNewTab').addEventListener('click', () => {
-  chrome.tabs.create({ url:'https://www.google.com', active:true });
-  setTimeout(loadTabs, 1000);
-});
-
-$('btnClearTarget').addEventListener('click', () => {
-  selectedTabId = null;
-  $('targetTabBadge').classList.add('hidden');
-  document.querySelectorAll('.tab-item').forEach(el => el.classList.remove('selected-tab'));
-});
-
-function loadTabs() { chrome.runtime.sendMessage({ type:'GET_TABS' }); }
-
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type === 'TABS_LIST') renderTabs(msg.tabs);
-});
-
-function renderTabs(tabs) {
-  const list = $('tabsList');
-  list.innerHTML = '';
-  tabs.forEach(tab => {
-    const div = document.createElement('div');
-    div.className = `tab-item${tab.active?' active-tab':''}${tab.id===selectedTabId?' selected-tab':''}`;
-    const fav = document.createElement('img');
-    fav.src = tab.favicon || '';
-    fav.onerror = () => fav.style.display='none';
-    const info = document.createElement('div');
-    info.style.cssText = 'flex:1;overflow:hidden;';
-    info.innerHTML = `<div class="tab-title">${esc(tab.title)}</div><div class="tab-url">${esc(tab.url)}</div>`;
-    div.append(fav, info);
-    div.addEventListener('click', () => {
-      selectedTabId = tab.id;
-      document.querySelectorAll('.tab-item').forEach(e => e.classList.remove('selected-tab'));
-      div.classList.add('selected-tab');
-      $('targetTabName').textContent = tab.title.substring(0,35);
-      $('targetTabBadge').classList.remove('hidden');
-      $('tabsPanel').classList.add('hidden');
-    });
-    list.appendChild(div);
-  });
+  const content = document.createElement('div');
+  content.className = 'message-content';
+  content.innerHTML = renderText(m.text);
+  div.append(content);
+  $('messages').append(div);
 }
-
-// ── Immagine allegata ─────────────────────────────────────────
-$('btnAttach').addEventListener('click', () => $('fileInput').click());
-
-$('fileInput').addEventListener('change', (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = (ev) => {
-    attachedImage = ev.target.result; // data URL base64
-    $('attachedThumb').src = attachedImage;
-    $('attachedImagePreview').classList.remove('hidden');
-    updateVisionWarning();
-  };
-  reader.readAsDataURL(file);
-  e.target.value = '';
-});
-
-$('btnRemoveImage').addEventListener('click', () => {
-  attachedImage = null;
-  $('attachedImagePreview').classList.add('hidden');
-  $('attachedThumb').src = '';
-  $('visionWarning').classList.add('hidden');
-});
-
-// ── Screenshot ────────────────────────────────────────────────
-$('btnScreenshot').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type:'SCREENSHOT' });
-});
-
-// ── Nuova conversazione (pulisce chat + memoria dell'agente) ──
-$('btnClearChat').addEventListener('click', () => {
-  if (agentRunning) return;
-  // Salva sessione corrente prima di cancellare (se non vuota)
-  if (currentSession.length > 0) saveSession();
-  $('messages').innerHTML = '';
-  currentSession = [];
-  attachedImage  = null;
-  $('attachedImagePreview').classList.add('hidden');
-  // Azzera anche la memoria persistente del worker
-  chrome.runtime.sendMessage({ type: 'NEW_CONVERSATION' });
-  addMessage('🆕 Nuova conversazione — chat e memoria dell\'agente azzerate', 'info');
-});
-
-// ── Cronologia ────────────────────────────────────────────────
-$('btnHistory').addEventListener('click', () => {
-  toggleDrawer('historyPanel');
-  if (!$('historyPanel').classList.contains('hidden')) {
-    $('historySearch').value = '';
-    renderHistory();
-  }
-});
-
-$('btnClearAllHistory').addEventListener('click', async () => {
-  const keys = await getHistoryKeys();
-  await chrome.storage.local.remove(keys);
-  renderHistory();
-});
-
-// Ricerca live nella cronologia
-$('historySearch').addEventListener('input', () => {
-  renderHistory($('historySearch').value.trim().toLowerCase());
-});
-
-async function getHistoryKeys() {
-  return new Promise(resolve => {
-    chrome.storage.local.get(null, (items) => {
-      resolve(Object.keys(items).filter(k => k.startsWith('session_')));
-    });
-  });
-}
-
-async function saveSession() {
-  if (currentSession.length === 0) return;
-  const key   = 'session_' + Date.now();
-  const first = currentSession.find(m => m.type === 'user')?.text ?? 'Sessione';
-  await chrome.storage.local.set({
-    [key]: {
-      title: first.substring(0,60),
-      date:  new Date().toLocaleString('it-IT'),
-      messages: currentSession.map(m => ({ type: m.type, text: m.text }))
-    }
-  });
-}
-
-async function renderHistory(filter = '') {
-  const list = $('historyList');
-  list.innerHTML = '';
-  const keys = await getHistoryKeys();
-
-  if (keys.length === 0) {
-    list.innerHTML = '<div class="no-history">Nessuna chat salvata</div>';
-    return;
-  }
-
-  const items = await new Promise(r => chrome.storage.local.get(keys, r));
-  // Ordina per data decrescente
-  keys.sort((a,b) => parseInt(b.split('_')[1]) - parseInt(a.split('_')[1]));
-
-  // Filtra per testo se presente
-  const filtered = filter
-    ? keys.filter(key => {
-        const s = items[key];
-        return s.title?.toLowerCase().includes(filter) ||
-               s.messages?.some(m => m.text?.toLowerCase().includes(filter));
-      })
-    : keys;
-
-  if (filtered.length === 0) {
-    list.innerHTML = '<div class="no-history">Nessun risultato</div>';
-    return;
-  }
-
-  filtered.forEach(key => {
-    const s = items[key];
-    const div = document.createElement('div');
-    div.className = 'history-item';
-    div.innerHTML = `
-      <div class="h-title">${esc(s.title)}</div>
-      <div class="h-date">${esc(s.date)}</div>
-      <button class="h-del" data-key="${key}" title="Elimina">🗑</button>
-    `;
-    div.addEventListener('click', (e) => {
-      if (e.target.classList.contains('h-del')) {
-        e.stopPropagation();
-        chrome.storage.local.remove(e.target.dataset.key, () =>
-          renderHistory($('historySearch').value.trim().toLowerCase())
-        );
-        return;
-      }
-      restoreSession(s.messages);
-      $('historyPanel').classList.add('hidden');
-    });
-    list.appendChild(div);
-  });
-}
-
-function restoreSession(messages) {
-  if (agentRunning) return;
-  $('messages').innerHTML = '';
-  currentSession = [];
-  messages.forEach(m => addMessage(m.text, m.type));
-  addMessage('📂 Sessione ripristinata (sola lettura)', 'info');
-}
-
-// ── Approvazione azione (modalità chiedi prima) ───────────────
-$('btnApprove').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type:'APPROVE_ACTION' });
-  $('approvalBar').classList.add('hidden');
-});
-
-$('btnSkip').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type:'SKIP_ACTION' });
-  $('approvalBar').classList.add('hidden');
-});
-
-// ── Avvio agente ──────────────────────────────────────────────
-$('btnStart').addEventListener('click', async () => {
-  const task = $('taskInput').value.trim();
-  if (!task) return;
-
-  // Se l'agente ha fatto una domanda (ask_user), questo testo è la RISPOSTA
-  if (awaitingReply) {
-    addMessage(task, 'user');
-    $('taskInput').value = '';
-    setAwaitingReply(false);
-    chrome.runtime.sendMessage({ type: 'USER_REPLY', text: task });
-    return;
-  }
-
-  const { apiKey, model, apiEndpoint, nativeTools } = await chrome.storage.sync.get(['apiKey','model','apiEndpoint','nativeTools']);
-  if (!apiKey) {
-    addMessage('❌ Configura la API Key nelle impostazioni ⚙️', 'error');
-    $('settingsPanel').classList.remove('hidden');
-    return;
-  }
-
-  // Costruisci contesto dalla sessione corrente (messaggi rilevanti degli ultimi passi)
-  let sessionContext = null;
-  if (currentSession.length > 0) {
-    const relevant = currentSession
-      .filter(m => ['user','thought','action','result','done','error'].includes(m.type))
-      .slice(-25);
-    if (relevant.length > 0) {
-      sessionContext = relevant
-        .map(m => `[${m.type.toUpperCase()}] ${m.text.substring(0, 200)}`)
-        .join('\n');
-    }
-  }
-
-  addMessage(task, 'user');
-  if (attachedImage) {
-    const div = document.createElement('div');
-    div.className = 'message user';
-    const img = document.createElement('img');
-    img.src = attachedImage;
-    div.appendChild(img);
-    $('messages').appendChild(div);
-    scrollToBottom();
-    currentSession.push({ type:'user', text:'[immagine allegata]' });
-  }
-
-  $('taskInput').value = '';
-  setRunning(true);
-
-  chrome.runtime.sendMessage({
-    type:           'START_AGENT',
-    task,
-    apiKey,
-    model:          model || 'gpt-4o-mini',
-    endpoint:       apiEndpoint || null,
-    nativeTools:    nativeTools === true,
-    tabId:          selectedTabId,
-    mode:           currentMode,
-    imageData:      attachedImage,
-    sessionContext
-  });
-
-  attachedImage = null;
-  $('attachedImagePreview').classList.add('hidden');
-});
-
-$('btnStop').addEventListener('click', () => {
-  chrome.runtime.sendMessage({ type:'STOP_AGENT' });
-});
-
-// ── Messaggi dal worker ───────────────────────────────────────
-chrome.runtime.onMessage.addListener((msg) => {
-  if (msg.type !== 'AGENT_UPDATE') return;
-
-  if (msg.updateType === 'screenshot') {
-    const div = document.createElement('div');
-    div.className = 'message result';
-    const img = document.createElement('img');
-    img.src = `data:image/jpeg;base64,${msg.data}`;
-    div.appendChild(img);
-    $('messages').appendChild(div);
-    currentSession.push({ type:'result', text:'[screenshot]' });
-    scrollToBottom();
-    return;
-  }
-
-  if (msg.updateType === 'approval_request') {
-    $('approvalText').textContent = `⚡ ${msg.extra?.action}(${JSON.stringify(msg.extra?.params)})`;
-    $('approvalBar').classList.remove('hidden');
-  } else {
-    $('approvalBar').classList.add('hidden');
-  }
-
-  addMessage(msg.text, msg.updateType);
-
-  // L'agente ha fatto una domanda: sblocca l'input per la risposta
-  if (msg.updateType === 'ask_user') {
-    setAwaitingReply(true);
-    return;
-  }
-
-  if (msg.updateType === 'save_report') {
-    downloadReport(currentSession);
-    return;
-  }
-
-  if (msg.updateType === 'done' || msg.text?.includes('Sessione terminata')) {
-    setAwaitingReply(false);
-    setRunning(false);
-    saveSession();
-  }
-});
-
-// Modalità "risposta all'agente": input abilitato anche mentre l'agente gira
-function setAwaitingReply(active) {
-  awaitingReply = active;
-  const btn = $('btnStart');
-  if (active) {
-    btn.disabled    = false;
-    btn.textContent = '↩ Rispondi';
-    $('taskInput').placeholder = 'Scrivi la risposta per l\'agente...';
-    $('taskInput').focus();
-  } else {
-    btn.textContent = '▶ Avvia';
-    btn.disabled    = agentRunning;
-    $('taskInput').placeholder = 'Descrivi cosa vuoi fare...';
-  }
-}
-
-// ── Helpers ───────────────────────────────────────────────────
-
-function renderText(raw) {
-  let s = raw
-    .replace(/&/g,'&amp;').replace(/</g,'&lt;')
-    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  // URL → link cliccabile
-  s = s.replace(/(https?:\/\/[^\s&<>"]+)/g,
-    '<a href="$1" target="_blank" rel="noopener" class="msg-link">$1</a>');
-  // **bold**
-  s = s.replace(/\*\*([^*\n]{1,100})\*\*/g, '<strong>$1</strong>');
-  // *italic*
-  s = s.replace(/(?<!\*)\*([^*\n]{1,100})\*(?!\*)/g, '<em>$1</em>');
-  // Voci lista (- o •)
-  s = s.replace(/^[-•]\s+(.+)$/gm, '<span class="li">▸ $1</span>');
-  // Newline → <br>
-  s = s.replace(/\n/g, '<br>');
-  return s;
-}
-
 function addMessage(text, type = 'info') {
-  const div = document.createElement('div');
-  div.className = `message ${type}`;
-  div.innerHTML = renderText(text);
-  $('messages').appendChild(div);
-  currentSession.push({ type, text });
+  currentSession.push({ text: String(text || ''), type });
+  drawMessage(currentSession.at(-1));
+  $('welcome').hidden = true;
+  scrollToBottom();
+}
+function drawScreenshot(data) {
+  const details = document.createElement('details');
+  details.className = 'message screenshot';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Screenshot della pagina';
+  const img = document.createElement('img');
+  img.src = 'data:image/jpeg;base64,' + data;
+  img.alt = 'Pagina osservata dall’agente';
+  details.append(summary, img);
+  $('messages').append(details);
+  scrollToBottom();
+}
+function setRunning(value) {
+  agentRunning = value;
+  $('btnStop').disabled = !value;
+  $('btnStart').disabled = value && !awaitingReply;
+  $('modeSelect').disabled = value;
+  $('btnClearChat').disabled = value;
+}
+function applyState(next) {
+  activeState = next;
+  currentSession = next.messages || [];
+  currentMode = next.mode || currentMode;
+  $('modeSelect').value = currentMode;
+  awaitingReply = next.pending?.type === 'question';
+  setRunning(!!next.running);
+  $('messages').replaceChildren();
+  currentSession.forEach(drawMessage);
+  $('welcome').hidden = currentSession.length > 0;
+  $('statusText').textContent = next.running ? next.status || 'Attività in corso' : 'Pronto';
+  $('statusDot').classList.toggle('busy', !!next.running);
+  $('planPanel').hidden = !next.plan;
+  if (next.plan) {
+    $('planSummary').textContent = next.plan.completed
+      ? 'Piano · completato'
+      : 'Piano · ' + next.plan.current + '/' + next.plan.steps.length;
+    $('planList').innerHTML = next.plan.steps
+      .map(
+        (step, i) =>
+          '<li class="' +
+          (i + 1 === next.plan.current ? 'current' : '') +
+          '">' +
+          esc(step) +
+          '</li>'
+      )
+      .join('');
+  }
+  $('progressText').textContent =
+    next.running && next.step
+      ? `${next.step}/${next.maxSteps} passi`
+      : next.tokens
+        ? `${next.tokens.toLocaleString('it-IT')} token`
+        : '';
+  $('btnStart').textContent = awaitingReply
+    ? 'Rispondi'
+    : currentMode === 'chat'
+      ? 'Invia'
+      : 'Avvia attività';
+  $('taskInput').placeholder = awaitingReply
+    ? next.pending.question
+    : currentMode === 'chat'
+      ? 'Scrivi a Diggio…'
+      : 'Descrivi cosa vuoi fare nel browser…';
+  $('approvalBar').classList.toggle('hidden', next.pending?.type !== 'approval');
+  if (next.pending?.type === 'approval') {
+    const p = next.pending;
+    $('approvalText').textContent = `${p.action} sulla pagina ${p.url}`;
+    $('approvalParams').value = JSON.stringify(p.params, null, 2);
+  }
+  $('questionText').hidden = !awaitingReply;
+  $('questionText').textContent = next.pending?.question || '';
   scrollToBottom();
 }
 
-function scrollToBottom() {
-  const m = $('messages');
-  m.scrollTop = m.scrollHeight;
-}
-
-function setRunning(running) {
-  agentRunning = running;
-  $('btnStart').disabled = running;
-  $('btnStop').disabled  = !running;
-}
-
-function toggleDrawer(id) {
-  const all = ['settingsPanel','tabsPanel','historyPanel','templatesPanel','toolsPanel','automationsPanel','guidePanel'];
-  all.forEach(p => { if (p !== id) $(p).classList.add('hidden'); });
-  $(id).classList.toggle('hidden');
-}
-
-// ── Guida ─────────────────────────────────────────────────────
-$('btnGuide').addEventListener('click', () => {
-  toggleDrawer('guidePanel');
-});
-
-function esc(str = '') {
-  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-}
-
-// ── Download Report HTML ──────────────────────────────────────
-$('btnDownload').addEventListener('click', () => {
-  if (currentSession.length === 0) {
-    addMessage('⚠️ Nessuna chat da scaricare', 'info');
-    return;
+chrome.runtime.onMessage.addListener((msg, sender, respond) => {
+  if (msg.type === 'AGENT_STATE') applyState(msg.state);
+  if (msg.type === 'AGENT_UPDATE') {
+    if (msg.updateType === 'screenshot') {
+      currentSession.push({ type: 'screenshot', data: msg.data });
+      drawScreenshot(msg.data);
+    } else if (msg.text) addMessage(msg.text, msg.updateType);
   }
-  downloadReport(currentSession);
-});
-
-function downloadReport(messages) {
-  const title = messages.find(m => m.type === 'user')?.text ?? 'Ricerca Diggio';
-  const date  = new Date().toLocaleString('it-IT');
-
-  const typeInfo = {
-    user:     { icon: '👤', label: 'Utente',    cls: 'msg-user'    },
-    thought:  { icon: '💭', label: 'Pensiero',  cls: 'msg-thought' },
-    action:   { icon: '⚡', label: 'Azione',    cls: 'msg-action'  },
-    result:   { icon: '📋', label: 'Risultato', cls: 'msg-result'  },
-    done:     { icon: '✅', label: 'Completato',cls: 'msg-done'    },
-    error:    { icon: '❌', label: 'Errore',    cls: 'msg-error'   },
-    info:     { icon: 'ℹ️', label: 'Info',      cls: 'msg-info'    },
-  };
-
-  const rows = messages
-    .filter(m => m.type !== 'thinking')
-    .map(m => {
-      const t = typeInfo[m.type] ?? { icon: '•', label: m.type, cls: '' };
-      const html = renderText(m.text ?? '');
-      return `
-        <div class="msg ${t.cls}">
-          <span class="badge">${t.icon} ${t.label}</span>
-          <div class="content">${html}</div>
-        </div>`;
-    }).join('');
-
-  const html = `<!DOCTYPE html>
-<html lang="it">
-<head>
-<meta charset="UTF-8">
-<title>Report Diggio — ${esc(title.substring(0, 60))}</title>
-<style>
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-         background: #0f0f1a; color: #e2e8f0; margin: 0; padding: 24px; }
-  .header { background: linear-gradient(135deg,#6366f1,#818cf8);
-            border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; }
-  .header h1 { margin: 0 0 4px; font-size: 1.3rem; color: #fff; }
-  .header p  { margin: 0; font-size: 0.85rem; color: rgba(255,255,255,0.75); }
-  .msg { background: #1e1e2e; border-radius: 10px; padding: 12px 16px;
-         margin-bottom: 10px; border-left: 3px solid #444; }
-  .msg-user    { border-color: #6366f1; background: #1e1b3a; }
-  .msg-thought { border-color: #a78bfa; background: #1e1a2e; }
-  .msg-action  { border-color: #38bdf8; background: #0f2033; }
-  .msg-result  { border-color: #34d399; background: #0f2a1e; }
-  .msg-done    { border-color: #4ade80; background: #0f2a18; }
-  .msg-error   { border-color: #f87171; background: #2a0f0f; }
-  .msg-info    { border-color: #94a3b8; }
-  .badge { font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
-           letter-spacing: .05em; color: #94a3b8; display: block; margin-bottom: 6px; }
-  .content { font-size: 0.9rem; line-height: 1.6; }
-  .content a { color: #818cf8; }
-  .content strong { color: #c4b5fd; }
-  .content .li { display: block; margin: 2px 0 2px 12px; }
-  .footer { text-align: center; margin-top: 32px; font-size: 0.75rem; color: #475569; }
-</style>
-</head>
-<body>
-  <div class="header">
-    <h1>📄 Report Diggio Agent</h1>
-    <p>${esc(title.substring(0, 100))} &nbsp;·&nbsp; ${date}</p>
-  </div>
-  ${rows}
-  <div class="footer">Generato da Diggio Agent IA · ${date} · <a href="https://www.diggio3000.it" style="color:#818cf8">www.diggio3000.it</a></div>
-</body>
-</html>`;
-
-  downloadBlob(html, 'text/html;charset=utf-8', 'diggio-report-' + Date.now() + '.html');
-}
-
-// ── Export CSV / JSON ─────────────────────────────────────────
-$('btnExportCSV').addEventListener('click', () => {
-  if (currentSession.length === 0) {
-    addMessage('⚠️ Nessun dato da esportare', 'info');
-    return;
+  if (msg.type === 'EXPORT_REPORT') {
+    try {
+      downloadReport(currentSession);
+      respond({ ok: true });
+    } catch (e) {
+      respond({ error: e.message });
+    }
+    return true;
   }
-  showExportMenu();
 });
 
-function showExportMenu() {
-  // Rimuovi menu già aperto (toggle)
-  const existing = $('exportMenu');
-  if (existing) { existing.remove(); return; }
-
-  const menu = document.createElement('div');
-  menu.id = 'exportMenu';
-  menu.className = 'export-menu';
-  menu.innerHTML = `
-    <button class="export-opt" data-fmt="csv">📊 Esporta CSV</button>
-    <button class="export-opt" data-fmt="json">{ } Esporta JSON</button>
-  `;
-
-  const btn = $('btnExportCSV');
-  const rect = btn.getBoundingClientRect();
-  menu.style.cssText = `position:fixed;bottom:${window.innerHeight - rect.top + 6}px;right:${window.innerWidth - rect.right}px;z-index:1000;`;
-  document.body.appendChild(menu);
-
-  menu.querySelectorAll('.export-opt').forEach(opt => {
-    opt.addEventListener('click', () => {
-      exportData(opt.dataset.fmt);
-      menu.remove();
+$('btnStart').addEventListener('click', async () => {
+  clearNotice();
+  const task = $('taskInput').value.trim();
+  if (!task) return;
+  try {
+    if (awaitingReply) {
+      await rpc({ type: 'USER_REPLY', text: task });
+      awaitingReply = false;
+      $('taskInput').value = '';
+      setRunning(true);
+      return;
+    }
+    if (agentRunning) return;
+    const cfg = await loadSettings();
+    if (!cfg.apiEndpoint || !cfg.model) {
+      toggleDrawer('settingsPanel');
+      throw new Error('Configura prima una connessione e un modello.');
+    }
+    setRunning(true);
+    await rpc({
+      type: 'START_AGENT',
+      task,
+      mode: currentMode,
+      tabId: selectedTabId,
+      imageData: attachedImage
     });
-  });
-
-  // Chiudi cliccando fuori (timeout per evitare chiusura immediata)
-  setTimeout(() => {
-    document.addEventListener('click', function handler() {
-      menu.remove();
-      document.removeEventListener('click', handler);
-    }, { once: true });
-  }, 0);
-}
-
-function exportData(format) {
-  const messages = currentSession.filter(m => !['thinking', 'info'].includes(m.type));
-
-  if (format === 'json') {
-    const json = JSON.stringify({
-      exportDate: new Date().toISOString(),
-      task: currentSession.find(m => m.type === 'user')?.text ?? '',
-      session: messages
-    }, null, 2);
-    downloadBlob(json, 'application/json;charset=utf-8', 'diggio-export-' + Date.now() + '.json');
-    return;
+    $('taskInput').value = '';
+    attachedImage = null;
+    $('attachedImagePreview').classList.add('hidden');
+  } catch (e) {
+    setRunning(false);
+    showError(e);
   }
+});
+$('taskInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+    e.preventDefault();
+    if (!$('btnStart').disabled) $('btnStart').click();
+  }
+});
+$('btnStop').addEventListener('click', () => rpc({ type: 'STOP_AGENT' }).catch(showError));
+$('btnApprove').addEventListener('click', async () => {
+  try {
+    const params = JSON.parse($('approvalParams').value);
+    await rpc({ type: 'APPROVE_ACTION', params });
+  } catch (e) {
+    showError(e);
+  }
+});
+$('btnSkip').addEventListener('click', () => rpc({ type: 'SKIP_ACTION' }).catch(showError));
+$('btnClearChat').addEventListener('click', async () => {
+  try {
+    applyState((await rpc({ type: 'NEW_CONVERSATION', mode: currentMode })).state);
+    closeDrawers();
+  } catch (e) {
+    showError(e);
+  }
+});
+$('btnChat').addEventListener('click', closeDrawers);
+$('modeSelect').addEventListener('change', () => {
+  currentMode = $('modeSelect').value;
+  $('btnStart').textContent = currentMode === 'chat' ? 'Invia' : 'Avvia attività';
+  $('taskInput').placeholder =
+    currentMode === 'chat' ? 'Scrivi a Diggio…' : 'Descrivi cosa vuoi fare nel browser…';
+});
+$('btnSettings').addEventListener('click', () => toggleDrawer('settingsPanel'));
+$('btnGuide').addEventListener('click', () => toggleDrawer('guidePanel'));
+$('btnTheme').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  chrome.storage.local.set({ theme: next });
+});
+function applyTheme(theme) {
+  document.documentElement.dataset.theme = theme === 'dark' ? 'dark' : 'light';
+  $('btnTheme').setAttribute(
+    'aria-label',
+    theme === 'dark' ? 'Attiva tema chiaro' : 'Attiva tema scuro'
+  );
+  $('btnTheme').textContent = theme === 'dark' ? '☀' : '◐';
+}
 
-  // CSV
-  const rows = [['tipo', 'testo']];
-  messages.forEach(m => {
-    const text = (m.text || '').replace(/"/g, '""').replace(/\n/g, ' ');
-    rows.push([m.type, `"${text}"`]);
+// Configurazioni private sul dispositivo. Endpoint custom senza riferimenti preimpostati.
+function formConfig() {
+  return {
+    provider: $('providerSelect').value,
+    apiEndpoint: $('apiEndpoint').value.trim(),
+    apiKey: $('apiKey').value.trim(),
+    model: $('modelManual').value.trim(),
+    modelsUrl: $('modelsUrl').value.trim(),
+    protocol: $('protocolSelect').value,
+    authType: $('authSelect').value,
+    authHeader: $('authHeader').value.trim(),
+    vision: $('visionSelect').value,
+    nativeTools: $('nativeToolsCheck').checked,
+    timeoutSeconds: Number($('timeoutSeconds').value),
+    maxSteps: Number($('maxSteps').value),
+    tokenBudget: Number($('tokenBudget').value)
+  };
+}
+function fillConfig(c) {
+  $('apiEndpoint').value = c.apiEndpoint || PRESETS[currentProvider] || '';
+  $('apiKey').value = c.apiKey || '';
+  $('modelManual').value = c.model || '';
+  $('modelsUrl').value = c.modelsUrl || '';
+  $('protocolSelect').value = c.protocol || 'auto';
+  $('authSelect').value = c.authType || 'auto';
+  $('authHeader').value = c.authHeader || 'X-API-Key';
+  $('visionSelect').value = c.vision || 'auto';
+  $('nativeToolsCheck').checked = !!c.nativeTools;
+  $('timeoutSeconds').value = c.timeoutSeconds || 120;
+  $('maxSteps').value = c.maxSteps || 40;
+  $('tokenBudget').value = c.tokenBudget || 80000;
+  $('modelSelect').replaceChildren();
+  $('modelSelect').classList.add('hidden');
+  $('modelLoadStatus').textContent = '';
+  $('testResult').textContent = '';
+  updateCustomFields();
+  updateVisionWarning();
+}
+function updateCustomFields() {
+  $('customHint').hidden = currentProvider !== 'custom';
+  $('authHeaderRow').hidden = $('authSelect').value !== 'header';
+}
+$('authSelect').addEventListener('change', updateCustomFields);
+$('providerSelect').addEventListener('change', () => {
+  profiles[currentProvider] = formConfig();
+  currentProvider = $('providerSelect').value;
+  fillConfig(profiles[currentProvider] || {});
+});
+$('modelManual').addEventListener('input', updateVisionWarning);
+$('visionSelect').addEventListener('change', updateVisionWarning);
+function updateVisionWarning() {
+  $('visionWarning').classList.toggle(
+    'hidden',
+    !attachedImage || supportsVision($('modelManual').value, $('visionSelect').value)
+  );
+}
+$('btnLoadModels').addEventListener('click', async () => {
+  const button = $('btnLoadModels');
+  button.disabled = true;
+  $('modelLoadStatus').textContent = 'Caricamento…';
+  try {
+    const c = formConfig();
+    c.apiEndpoint = chatEndpoint(c.apiEndpoint, c.protocol);
+    const url = modelsEndpoint(c.apiEndpoint, c.modelsUrl);
+    const ids = normalizeModels(
+      await requestJson(url, { headers: headersFor(c, url) }, { timeout: 30000 })
+    );
+    if (!ids.length) throw new Error('Nessun modello disponibile.');
+    $('modelSelect').replaceChildren(...ids.map((id) => new Option(id, id)));
+    $('modelSelect').classList.remove('hidden');
+    if (ids.includes(c.model)) $('modelSelect').value = c.model;
+    else if (!c.model) {
+      $('modelManual').value = ids[0];
+    }
+    $('modelLoadStatus').textContent = `${ids.length} modelli disponibili`;
+  } catch (e) {
+    $('modelLoadStatus').textContent = e.message;
+  } finally {
+    button.disabled = false;
+  }
+});
+$('modelSelect').addEventListener('change', () => {
+  $('modelManual').value = $('modelSelect').value;
+  updateVisionWarning();
+});
+async function saveSettings(test) {
+  const c = formConfig();
+  if (!c.model) throw new Error('Inserisci o scegli un modello.');
+  c.apiEndpoint = chatEndpoint(c.apiEndpoint, c.protocol);
+  if (c.modelsUrl) modelsEndpoint(c.apiEndpoint, c.modelsUrl);
+  if (
+    c.timeoutSeconds < 10 ||
+    c.timeoutSeconds > 300 ||
+    c.maxSteps < 1 ||
+    c.maxSteps > 80 ||
+    c.tokenBudget < 1000
+  )
+    throw new Error('Verifica i limiti: 10–300 secondi, 1–80 passi, almeno 1000 token.');
+  headersFor(c);
+  profiles[currentProvider] = c;
+  await chrome.storage.local.set({
+    ...c,
+    providerConfigs: profiles,
+    userMemory: $('userMemory').value.slice(0, 3000)
   });
-  const csv = '\uFEFF' + rows.map(r => r.join(',')).join('\n'); // BOM per Excel
-  downloadBlob(csv, 'text/csv;charset=utf-8', 'diggio-export-' + Date.now() + '.csv');
+  settings = c;
+  $('connectionLabel').textContent = c.model;
+  $('testResult').textContent = 'Configurazione salvata sul dispositivo.';
+  if (test) {
+    $('testResult').textContent = 'Verifica connessione…';
+    const client = new DiggioClient(c.apiKey, c.model, c.apiEndpoint, c);
+    const reply = await client.chat([{ role: 'user', content: 'Rispondi solo OK.' }]);
+    $('testResult').textContent = 'Connessione riuscita · ' + reply.slice(0, 70);
+  }
 }
+$('btnSaveSettings').addEventListener('click', async () => {
+  const b = $('btnSaveSettings');
+  b.disabled = true;
+  try {
+    await saveSettings(true);
+  } catch (e) {
+    $('testResult').textContent = e.message;
+  } finally {
+    b.disabled = false;
+  }
+});
+$('btnSaveOnly').addEventListener('click', () =>
+  saveSettings(false).catch((e) => ($('testResult').textContent = e.message))
+);
+$('btnShowKey').addEventListener('click', () => {
+  $('apiKey').type = $('apiKey').type === 'password' ? 'text' : 'password';
+  $('btnShowKey').textContent = $('apiKey').type === 'password' ? 'Mostra' : 'Nascondi';
+});
 
-function downloadBlob(content, mimeType, filename) {
-  const blob = new Blob([content], { type: mimeType });
-  const url  = URL.createObjectURL(blob);
-  const a    = document.createElement('a');
-  a.href     = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
+$('btnAttach').addEventListener('click', () => $('fileInput').click());
+$('fileInput').addEventListener('change', async () => {
+  const file = $('fileInput').files[0];
+  if (!file) return;
+  try {
+    if (!/^image\/(png|jpeg|webp)$/.test(file.type) || file.size > 5 * 1024 * 1024)
+      throw new Error('Scegli un’immagine PNG, JPEG o WebP sotto 5 MB.');
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, 1200 / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width * scale;
+    canvas.height = bitmap.height * scale;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close();
+    attachedImage = canvas.toDataURL('image/jpeg', 0.75);
+    $('attachedThumb').src = attachedImage;
+    $('attachedImagePreview').classList.remove('hidden');
+    updateVisionWarning();
+  } catch (e) {
+    showError(e);
+  } finally {
+    $('fileInput').value = '';
+  }
+});
+$('btnRemoveImage').addEventListener('click', () => {
+  attachedImage = null;
+  $('attachedImagePreview').classList.add('hidden');
+});
+$('btnScreenshot').addEventListener('click', async () => {
+  try {
+    const result = await rpc({ type: 'SCREENSHOT' });
+    drawScreenshot(result.data);
+  } catch (e) {
+    showError(e);
+  }
+});
+
+$('btnTabs').addEventListener('click', async () => {
+  toggleDrawer('tabsPanel');
+  try {
+    renderTabs((await rpc({ type: 'GET_TABS' })).tabs);
+  } catch (e) {
+    showError(e);
+  }
+});
+$('btnNewTab').addEventListener('click', async () => {
+  await chrome.tabs.create({ url: 'https://www.google.com' });
+  renderTabs((await rpc({ type: 'GET_TABS' })).tabs);
+});
+$('btnClearTarget').addEventListener('click', () => {
+  selectedTabId = null;
+  $('targetBadge').classList.add('hidden');
+});
+function renderTabs(tabs) {
+  $('tabsList').replaceChildren();
+  tabs
+    .filter((t) => /^https?:/.test(t.url))
+    .forEach((t) => {
+      const b = document.createElement('button');
+      b.className = 'tab-item';
+      b.innerHTML = `<div><strong>${esc(t.title)}</strong><div class="tab-url">${esc(t.url)}</div></div>`;
+      b.addEventListener('click', () => {
+        selectedTabId = t.id;
+        $('targetTabName').textContent = t.title;
+        $('targetBadge').classList.remove('hidden');
+        closeDrawers();
+      });
+      $('tabsList').append(b);
+    });
 }
+$('btnHistory').addEventListener('click', () => {
+  toggleDrawer('historyPanel');
+  renderHistory();
+});
+$('historySearch').addEventListener('input', () => renderHistory($('historySearch').value));
+async function renderHistory(filter = '') {
+  const all = await chrome.storage.local.get(null);
+  const keys = Object.keys(all)
+    .filter((k) => k.startsWith('session_'))
+    .sort((a, b) => (all[b].updated || 0) - (all[a].updated || 0));
+  $('historyList').replaceChildren();
+  for (const key of keys) {
+    const item = all[key];
+    if (!JSON.stringify(item.messages).toLowerCase().includes(filter.toLowerCase())) continue;
+    const row = document.createElement('div');
+    row.className = 'history-item';
+    const open = document.createElement('button');
+    open.className = 'history-open';
+    open.innerHTML = `<strong>${esc(item.title)}</strong><small>${esc(item.date)}</small>`;
+    open.addEventListener('click', async () => {
+      try {
+        applyState((await rpc({ type: 'RESTORE_CONVERSATION', key })).state);
+        closeDrawers();
+      } catch (e) {
+        showError(e);
+      }
+    });
+    const del = document.createElement('button');
+    del.className = 'h-del';
+    del.textContent = '×';
+    del.title = 'Elimina conversazione';
+    del.addEventListener('click', async () => {
+      if (confirm('Eliminare questa conversazione?')) {
+        await chrome.storage.local.remove(key);
+        renderHistory(filter);
+      }
+    });
+    row.append(open, del);
+    $('historyList').append(row);
+  }
+  if (!$('historyList').children.length)
+    $('historyList').textContent = 'Nessuna conversazione trovata.';
+}
+$('btnClearAllHistory').addEventListener('click', async () => {
+  if (!confirm('Eliminare tutte le conversazioni salvate?')) return;
+  const all = await chrome.storage.local.get(null);
+  await chrome.storage.local.remove(Object.keys(all).filter((k) => k.startsWith('session_')));
+  renderHistory();
+});
+function downloadBlob(content, type, name) {
+  const url = URL.createObjectURL(new Blob([content], { type }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+function downloadReport(messages) {
+  if (!messages.length) throw new Error('La conversazione è vuota.');
+  const title = messages.find((m) => m.type === 'user')?.text || 'Conversazione';
+  downloadBlob(
+    `<!doctype html><html lang="it"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${esc(title.slice(0, 80))}</title><style>body{font:16px/1.6 system-ui;max-width:900px;margin:40px auto;padding:20px;color:#17324a}article{padding:20px;border-bottom:1px solid #ddd}pre{white-space:pre-wrap}table{border-collapse:collapse}td,th{border:1px solid #ddd;padding:8px}a{color:#0754be}</style><h1>${esc(title)}</h1>${messages.map((m) => `<article><b>${esc(m.type)}</b>${m.type === 'screenshot' ? '<img alt="Screenshot" style="max-width:100%" src="data:image/jpeg;base64,' + esc(m.data) + '">' : renderText(m.text)}</article>`).join('')}</html>`,
+    'text/html;charset=utf-8',
+    'diggio-report.html'
+  );
+}
+$('btnDownload').addEventListener('click', () => {
+  try {
+    downloadReport(currentSession);
+  } catch (e) {
+    showError(e);
+  }
+});
+$('btnExportCSV').addEventListener('click', () => {
+  $('exportOptions').hidden = !$('exportOptions').hidden;
+});
+for (const b of document.querySelectorAll('[data-export]'))
+  b.addEventListener('click', () => {
+    const format = b.dataset.export;
+    if (format === 'html') downloadReport(currentSession);
+    else if (format === 'json')
+      downloadBlob(
+        JSON.stringify({ date: new Date().toISOString(), messages: currentSession }, null, 2),
+        'application/json',
+        'diggio-chat.json'
+      );
+    else
+      downloadBlob(
+        '\uFEFF' +
+          [['tipo', 'testo'], ...currentSession.map((m) => [m.type, m.text])]
+            .map((row) => row.map(csvCell).join(','))
+            .join('\r\n'),
+        'text/csv;charset=utf-8',
+        'diggio-chat.csv'
+      );
+    $('exportOptions').hidden = true;
+  });
+for (const b of document.querySelectorAll('[data-prompt]'))
+  b.addEventListener('click', () => {
+    $('taskInput').value = b.dataset.prompt;
+    if (b.dataset.agent) {
+      currentMode = 'ask_first';
+      $('modeSelect').value = currentMode;
+      $('modeSelect').dispatchEvent(new Event('change'));
+    }
+    $('taskInput').focus();
+  });
+for (const drawer of DRAWERS) {
+  const button = document.createElement('button');
+  button.className = 'drawer-close';
+  button.textContent = 'Chiudi ×';
+  button.addEventListener('click', closeDrawers);
+  $(drawer).prepend(button);
+}
+for (const button of document.querySelectorAll('button[title]'))
+  button.setAttribute('aria-label', button.title);
+for (const label of document.querySelectorAll('label')) {
+  const field = label.nextElementSibling;
+  if (field?.id && ['INPUT', 'SELECT', 'TEXTAREA'].includes(field.tagName))
+    label.htmlFor = field.id;
+}
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') closeDrawers();
+});
+async function initialize() {
+  settings = await loadSettings();
+  profiles = settings.providerConfigs || {};
+  currentProvider = settings.provider || 'openai';
+  $('providerSelect').value = currentProvider;
+  profiles[currentProvider] ||= settings;
+  fillConfig(profiles[currentProvider]);
+  $('userMemory').value = settings.userMemory || '';
+  applyTheme(
+    settings.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  );
+  $('footerVersion').textContent = 'v' + chrome.runtime.getManifest().version;
+  $('connectionLabel').textContent = settings.model || 'Configura il tuo modello';
+  applyState((await rpc({ type: 'GET_STATE' })).state);
+}
+initialize().catch(showError);
 
 // ── Riassunto pagina ──────────────────────────────────────────
 $('btnSummary').addEventListener('click', () => {
-  $('taskInput').value =
-`Analizza e riassumi la pagina corrente:
+  $('taskInput').value = `Analizza e riassumi la pagina corrente:
 1. Usa read_page() per leggere il contenuto completo
 2. Scatta uno screenshot per vedere il layout visivo
 3. Produci un riassunto strutturato con:
@@ -781,13 +630,16 @@ $('btnSummary').addEventListener('click', () => {
    - Punti chiave (max 10 bullet point)
    - Informazioni importanti (prezzi, date, contatti se presenti)
    - Link e risorse principali trovati`;
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
+  closeDrawers();
   $('taskInput').focus();
 });
 
 // ── Traduci e analizza ────────────────────────────────────────
 $('btnTranslate').addEventListener('click', () => {
-  $('taskInput').value =
-`Traduci e analizza la pagina corrente:
+  $('taskInput').value = `Traduci e analizza la pagina corrente:
 1. Usa read_page() per leggere il testo originale
 2. Scatta uno screenshot per vedere il contesto visivo
 3. Produci in italiano:
@@ -795,6 +647,10 @@ $('btnTranslate').addEventListener('click', () => {
    - Riassunto dei punti chiave
    - Eventuali informazioni importanti (prezzi, date, contatti)
    - Note su elementi tecnici o culturali rilevanti`;
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
+  closeDrawers();
   $('taskInput').focus();
 });
 
@@ -826,7 +682,7 @@ $('templateSearchInput').addEventListener('input', () => {
 });
 
 async function loadTemplates() {
-  return new Promise(r => chrome.storage.local.get('templates', d => r(d.templates || [])));
+  return new Promise((r) => chrome.storage.local.get('templates', (d) => r(d.templates || [])));
 }
 
 async function renderTemplates(filter = '') {
@@ -834,8 +690,8 @@ async function renderTemplates(filter = '') {
   list.innerHTML = '';
   const templates = await loadTemplates();
   const filtered = filter
-    ? templates.filter(t =>
-        t.title.toLowerCase().includes(filter) || t.text.toLowerCase().includes(filter)
+    ? templates.filter(
+        (t) => t.title.toLowerCase().includes(filter) || t.text.toLowerCase().includes(filter)
       )
     : templates;
 
@@ -844,7 +700,7 @@ async function renderTemplates(filter = '') {
     return;
   }
 
-  filtered.forEach(t => {
+  filtered.forEach((t) => {
     const div = document.createElement('div');
     div.className = 'history-item';
     div.innerHTML = `
@@ -855,13 +711,13 @@ async function renderTemplates(filter = '') {
       if (e.target.classList.contains('h-del')) {
         e.stopPropagation();
         const all = await loadTemplates();
-        const updated = all.filter(x => x.id !== parseInt(e.target.dataset.id));
+        const updated = all.filter((x) => x.id !== parseInt(e.target.dataset.id));
         await chrome.storage.local.set({ templates: updated });
         renderTemplates($('templateSearchInput').value.trim().toLowerCase());
         return;
       }
       $('taskInput').value = t.text;
-      $('templatesPanel').classList.add('hidden');
+      closeDrawers();
       $('taskInput').focus();
     });
     list.appendChild(div);
@@ -889,17 +745,18 @@ async function renderSiteKnowledge() {
   const domains = Object.keys(knowledge).sort();
   list.innerHTML = '';
   if (domains.length === 0) {
-    list.innerHTML = '<div class="no-history">Nessun appunto ancora — l\'agente impara mentre naviga</div>';
+    list.innerHTML =
+      '<div class="no-history">Nessun appunto ancora — l\'agente impara mentre naviga</div>';
     return;
   }
-  domains.forEach(d => {
+  domains.forEach((d) => {
     const entry = knowledge[d];
     const notes = entry?.notes ?? [];
     const div = document.createElement('div');
     div.className = 'history-item';
     div.innerHTML = `
       <div class="h-title">🌐 ${esc(d)} <span style="color:#94a3b8;font-weight:400">(${notes.length} appunt${notes.length === 1 ? 'o' : 'i'})</span></div>
-      <div class="h-date" style="white-space:pre-line">${esc(notes.map(n => '• ' + n).join('\n'))}</div>
+      <div class="h-date" style="white-space:pre-line">${esc(notes.map((n) => '• ' + n).join('\n'))}</div>
       <button class="h-del" title="Dimentica questo sito">🗑</button>
     `;
     div.querySelector('.h-del').addEventListener('click', async (e) => {
@@ -923,11 +780,14 @@ $('scraperLoop').addEventListener('change', () => {
 });
 
 $('btnScraperGenera').addEventListener('click', () => {
-  const url    = $('scraperUrl').value.trim();
+  const url = $('scraperUrl').value.trim();
   const target = $('scraperTarget').value.trim();
-  if (!url || !target) { alert('Inserisci URL e cosa estrarre.'); return; }
+  if (!url || !target) {
+    alert('Inserisci URL e cosa estrarre.');
+    return;
+  }
 
-  const loop      = $('scraperLoop').checked;
+  const loop = $('scraperLoop').checked;
   const condition = $('scraperCondition').value.trim();
 
   let prompt = `Vai su: ${url}\n\nAnalizza la pagina e trova: ${target}\n`;
@@ -949,6 +809,9 @@ Modalità LOOP — monitoraggio attivo:
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
   $('taskInput').focus();
 });
 
@@ -957,14 +820,16 @@ $('btnConfrontoGenera').addEventListener('click', () => {
   const urls = [
     $('confrontoUrl1').value.trim(),
     $('confrontoUrl2').value.trim(),
-    $('confrontoUrl3').value.trim(),
+    $('confrontoUrl3').value.trim()
   ].filter(Boolean);
 
-  if (urls.length < 2) { alert('Inserisci almeno 2 URL da confrontare.'); return; }
+  if (urls.length < 2) {
+    alert('Inserisci almeno 2 URL da confrontare.');
+    return;
+  }
 
   const urlList = urls.map((u, i) => `${i + 1}. ${u}`).join('\n');
-  const prompt =
-`Confronta questi prodotti visitandoli in sequenza:
+  const prompt = `Confronta questi prodotti visitandoli in sequenza:
 ${urlList}
 
 Per ogni prodotto:
@@ -981,13 +846,16 @@ Usa open_tabs per aprire i prodotti in schede separate se necessario.`;
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
   $('taskInput').focus();
 });
 
 // — Form Filler —
 async function loadFormFillerData() {
-  const data = await new Promise(r =>
-    chrome.storage.local.get('formFillerData', d => r(d.formFillerData || ''))
+  const data = await new Promise((r) =>
+    chrome.storage.local.get('formFillerData', (d) => r(d.formFillerData || ''))
   );
   $('formFillerData').value = data;
 }
@@ -997,20 +865,24 @@ $('btnFormFillerSave').addEventListener('click', async () => {
   await chrome.storage.local.set({ formFillerData: data });
   const btn = $('btnFormFillerSave');
   btn.textContent = '✅ Salvato!';
-  setTimeout(() => { btn.textContent = '💾 Salva'; }, 1500);
+  setTimeout(() => {
+    btn.textContent = '💾 Salva';
+  }, 1500);
 });
 
 $('btnFormFillerGenera').addEventListener('click', async () => {
   let data = $('formFillerData').value.trim();
   if (!data) {
-    data = await new Promise(r =>
-      chrome.storage.local.get('formFillerData', d => r(d.formFillerData || ''))
+    data = await new Promise((r) =>
+      chrome.storage.local.get('formFillerData', (d) => r(d.formFillerData || ''))
     );
   }
-  if (!data) { alert('Inserisci i dati da usare per compilare i form.'); return; }
+  if (!data) {
+    alert('Inserisci i dati da usare per compilare i form.');
+    return;
+  }
 
-  const prompt =
-`Compila il form sulla pagina corrente usando questi dati:
+  const prompt = `Compila il form sulla pagina corrente usando questi dati:
 ${data}
 
 Istruzioni:
@@ -1022,31 +894,43 @@ Istruzioni:
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
   $('taskInput').focus();
 });
 
 // — Analisi SEO —
 $('btnSeoGenera').addEventListener('click', () => {
   const url = $('seoUrl').value.trim();
-  if (!url) { alert('Inserisci l\'URL del sito da analizzare.'); return; }
+  if (!url) {
+    alert("Inserisci l'URL del sito da analizzare.");
+    return;
+  }
 
-  const checks = Array.from(document.querySelectorAll('.seo-cb:checked')).map(cb => cb.value);
+  const checks = Array.from(document.querySelectorAll('.seo-cb:checked')).map((cb) => cb.value);
 
   const checkMap = {
-    meta:     'meta title, meta description (lunghezza e presenza), canonical URL, og:title/og:description, twitter card, lang dell\'html',
-    headings: 'struttura heading H1-H6: presenza H1 unico, gerarchia corretta, testi significativi, keyword stuffing',
-    links:    'link interni (con anchor text), link esterni (follow/nofollow), link rotti (errori 404), link con target=_blank senza rel=noopener',
-    images:   'tutte le immagini: verifica alt text mancante o vuoto, dimensioni enormi non ottimizzate, lazy loading assente',
-    robots:   'carica /robots.txt e /sitemap.xml: verifica presenza, direttive Disallow, sitemap correttamente dichiarata',
-    speed:    'dimensione HTML, numero di script/CSS bloccanti, uso di webfonts esterni, script in <head> senza async/defer',
-    mobile:   'meta viewport presente e corretto, testi leggibili senza zoom, elementi cliccabili abbastanza grandi, larghezza contenuto',
-    schema:   'cerca JSON-LD o microdati: tipo di schema (Article, Product, Organization, BreadcrumbList, FAQPage), validità struttura'
+    meta: "meta title, meta description (lunghezza e presenza), canonical URL, og:title/og:description, twitter card, lang dell'html",
+    headings:
+      'struttura heading H1-H6: presenza H1 unico, gerarchia corretta, testi significativi, keyword stuffing',
+    links:
+      'link interni (con anchor text), link esterni (follow/nofollow), link rotti (errori 404), link con target=_blank senza rel=noopener',
+    images:
+      'tutte le immagini: verifica alt text mancante o vuoto, dimensioni enormi non ottimizzate, lazy loading assente',
+    robots:
+      'carica /robots.txt e /sitemap.xml: verifica presenza, direttive Disallow, sitemap correttamente dichiarata',
+    speed:
+      'dimensione HTML, numero di script/CSS bloccanti, uso di webfonts esterni, script in <head> senza async/defer',
+    mobile:
+      'meta viewport presente e corretto, testi leggibili senza zoom, elementi cliccabili abbastanza grandi, larghezza contenuto',
+    schema:
+      'cerca JSON-LD o microdati: tipo di schema (Article, Product, Organization, BreadcrumbList, FAQPage), validità struttura'
   };
 
-  const tasks = checks.map(c => `- ${checkMap[c] ?? c}`).join('\n');
+  const tasks = checks.map((c) => `- ${checkMap[c] ?? c}`).join('\n');
 
-  const prompt =
-`Esegui un'analisi SEO completa di: ${url}
+  const prompt = `Esegui un'analisi SEO completa di: ${url}
 
 STEP 1 — Vai sul sito principale:
 - navigate("${url}")
@@ -1080,13 +964,16 @@ Scatta screenshot della homepage e del report finale.`;
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
   $('taskInput').focus();
 });
 
 // — Analisi Google Ads —
 $('btnAdsGenera').addEventListener('click', () => {
   const scope = $('adsScope').value;
-  const fix   = $('adsFix').checked;
+  const fix = $('adsFix').checked;
 
   const scopeSteps = {
     campaigns: `STEP — CAMPAGNE:
@@ -1110,7 +997,8 @@ STEP 4 — TERMINI DI RICERCA: individua query irrilevanti che consumano budget
 STEP 5 — ANNUNCI: stato, annunci rifiutati e motivo`
   };
 
-  const fixPart = fix ? `
+  const fixPart = fix
+    ? `
 
 DOPO L'ANALISI — CORREZIONI (una alla volta):
 Per ogni problema trovato, in ordine di impatto:
@@ -1118,12 +1006,12 @@ Per ogni problema trovato, in ordine di impatto:
 2. Se confermo: applica la modifica e scatta screenshot di verifica
 3. Se rifiuto: passa alla correzione successiva
 Correzioni tipiche: aggiungere parole chiave negative, mettere in pausa keyword con quality score
-molto basso, segnalare campagne con budget da rivedere (NON cambiare mai i budget senza il mio ok esplicito).` : `
+molto basso, segnalare campagne con budget da rivedere (NON cambiare mai i budget senza il mio ok esplicito).`
+    : `
 
 NON applicare nessuna modifica — solo analisi e suggerimenti.`;
 
-  const prompt =
-`Analizza il mio account Google Ads (sono già loggato su ads.google.com).
+  const prompt = `Analizza il mio account Google Ads (sono già loggato su ads.google.com).
 ⚠️ L'interfaccia è una SPA lenta: dopo ogni navigazione usa wait(4) prima di leggere.
 
 ${scopeSteps[scope] ?? scopeSteps.full}
@@ -1136,16 +1024,28 @@ REPORT FINALE:
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
   $('taskInput').focus();
 });
 
 // — Controllo Sicurezza Sito —
 $('btnSecGenera').addEventListener('click', () => {
   const url = $('secUrl').value.trim();
-  if (!url) { alert('Inserisci l\'URL del sito da controllare.'); return; }
+  if (!url) {
+    alert("Inserisci l'URL del sito da controllare.");
+    return;
+  }
 
-  const checks = Array.from(document.querySelectorAll('.sec-cb:checked')).map(cb => cb.value);
-  const domain = (() => { try { return new URL(url).hostname; } catch { return url; } })();
+  const checks = Array.from(document.querySelectorAll('.sec-cb:checked')).map((cb) => cb.value);
+  const domain = (() => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  })();
 
   const steps = [];
 
@@ -1255,8 +1155,7 @@ $('btnSecGenera').addEventListener('click', () => {
 - Controlla anche le schede Network per risorse caricate da domini sospetti usando read_page() sulla pagina principale`);
   }
 
-  const prompt =
-`Esegui un controllo di sicurezza completo per: ${url}
+  const prompt = `Esegui un controllo di sicurezza completo per: ${url}
 (Dominio: ${domain})
 
 ${steps.join('\n\n')}
@@ -1271,27 +1170,40 @@ Genera un report strutturato con:
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
   $('taskInput').focus();
 });
 
 // — Verifica Sito Truffa —
 $('btnScamGenera').addEventListener('click', () => {
-  const url  = $('scamUrl').value.trim();
+  const url = $('scamUrl').value.trim();
   const deep = $('scamDeep').checked;
-  if (!url) { alert('Inserisci l\'URL del sito da verificare.'); return; }
+  if (!url) {
+    alert("Inserisci l'URL del sito da verificare.");
+    return;
+  }
 
-  const domain = (() => { try { return new URL(url).hostname; } catch { return url; } })();
+  const domain = (() => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  })();
 
-  const deepSteps = deep ? `
+  const deepSteps = deep
+    ? `
 STEP REPUTAZIONE ESTERNA (cerca conferme indipendenti):
 - navigate("https://www.google.com/search?q=${encodeURIComponent('"' + domain + '" truffa OR recensioni OR opinioni OR scam OR fake')}")
 - read_page() per leggere i primi risultati di ricerca
 - navigate("https://www.trustpilot.com/review/${domain}") e leggi le recensioni (se presenti)
 - navigate("https://web.archive.org/web/*/${domain}") per verificare da quando esiste il sito
-- Se trovi forum/blog con segnalazioni, annota le URL` : '';
+- Se trovi forum/blog con segnalazioni, annota le URL`
+    : '';
 
-  const prompt =
-`Verifica se questo sito è legittimo o una possibile truffa: ${url}
+  const prompt = `Verifica se questo sito è legittimo o una possibile truffa: ${url}
 
 STEP 1 — Analisi visiva e contenuto:
 - navigate("${url}")
@@ -1329,25 +1241,29 @@ REPORT FINALE:
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
   $('taskInput').focus();
 });
 
 // — Ricerca Google —
 $('btnGoogleGenera').addEventListener('click', () => {
-  const query     = $('googleQuery').value.trim();
+  const query = $('googleQuery').value.trim();
   const linksOnly = $('googleLinksOnly').checked;
-  if (!query) { alert('Inserisci una query di ricerca.'); return; }
+  if (!query) {
+    alert('Inserisci una query di ricerca.');
+    return;
+  }
 
   let prompt;
   if (linksOnly) {
-    prompt =
-`Vai su https://www.google.com e cerca: "${query}"
+    prompt = `Vai su https://www.google.com e cerca: "${query}"
 Usa read_page() per estrarre tutti i link dei risultati organici (ignora pubblicità e box Google).
 Restituisci una lista ordinata con: numero, titolo, URL e descrizione breve per ogni risultato.
 Non aprire i singoli link.`;
   } else {
-    prompt =
-`Vai su https://www.google.com e cerca: "${query}"
+    prompt = `Vai su https://www.google.com e cerca: "${query}"
 Usa read_page() per vedere i risultati, poi apri i primi 3-5 risultati organici più pertinenti.
 Per ogni pagina: usa read_page() per leggere il contenuto rilevante e scatta uno screenshot.
 Alla fine sintetizza le informazioni trovate in un report completo con fonti e link diretti.`;
@@ -1355,6 +1271,9 @@ Alla fine sintetizza le informazioni trovate in un report completo con fonti e l
 
   $('taskInput').value = prompt;
   toggleDrawer('toolsPanel');
+  currentMode = 'ask_first';
+  $('modeSelect').value = currentMode;
+  $('modeSelect').dispatchEvent(new Event('change'));
   $('taskInput').focus();
 });
 
@@ -1396,33 +1315,41 @@ $('btnAutoCancel').addEventListener('click', () => {
 $('btnAutoSave').addEventListener('click', async () => {
   const name = $('autoName').value.trim();
   const task = $('autoTask').value.trim();
-  if (!name) { alert('Inserisci un nome per l\'automazione.'); return; }
-  if (!task) { alert('Inserisci il task da eseguire.'); return; }
+  if (!name) {
+    alert("Inserisci un nome per l'automazione.");
+    return;
+  }
+  if (!task) {
+    alert('Inserisci il task da eseguire.');
+    return;
+  }
 
   const schedType = document.querySelector('input[name="schedType"]:checked').value;
-  const intervalVal  = parseInt($('autoIntervalVal').value) || 1;
+  const intervalVal = parseInt($('autoIntervalVal').value) || 1;
   const intervalUnit = parseInt($('autoIntervalUnit').value) || 60;
   const intervalMinutes = intervalVal * intervalUnit;
 
-  const days = Array.from(document.querySelectorAll('.day-cb:checked')).map(cb => parseInt(cb.value));
+  const days = Array.from(document.querySelectorAll('.day-cb:checked')).map((cb) =>
+    parseInt(cb.value)
+  );
 
   const idVal = $('autoId').value;
   const automation = {
-    id:              idVal ? parseInt(idVal) : Date.now(),
+    id: idVal ? parseInt(idVal) : Date.now(),
     name,
     task,
-    scheduleType:    schedType,
+    scheduleType: schedType,
     intervalMinutes: schedType === 'interval' ? intervalMinutes : null,
-    time:            schedType === 'daily' ? $('autoTime').value : null,
-    days:            schedType === 'daily' ? days : [],
-    stopCondition:   $('autoStop').value.trim(),
-    maxRuns:         parseInt($('autoMaxRuns').value) || 0,
-    runsCount:       0,
-    active:          true,
-    lastRun:         null,
-    lastResult:      null,
-    nextRun:         null,
-    model:           $('autoModel').value
+    time: schedType === 'daily' ? $('autoTime').value : null,
+    days: schedType === 'daily' ? days : [],
+    stopCondition: $('autoStop').value.trim(),
+    maxRuns: parseInt($('autoMaxRuns').value) || 0,
+    runsCount: 0,
+    active: true,
+    lastRun: null,
+    lastResult: null,
+    nextRun: null,
+    model: $('autoModel').value
   };
 
   // Mantieni runsCount se è una modifica
@@ -1431,7 +1358,12 @@ $('btnAutoSave').addEventListener('click', async () => {
     if (existing) automation.runsCount = existing.runsCount || 0;
   }
 
-  await chrome.runtime.sendMessage({ type: 'SAVE_AUTOMATION', automation });
+  try {
+    await rpc({ type: 'SAVE_AUTOMATION', automation });
+  } catch (e) {
+    showError(e);
+    return;
+  }
   $('autoForm').classList.add('hidden');
   $('autoList').classList.remove('hidden');
   renderAutomations();
@@ -1445,42 +1377,42 @@ chrome.runtime.onMessage.addListener((msg) => {
 });
 
 function openAutoForm(auto) {
-  $('autoId').value    = auto ? auto.id : '';
-  $('autoName').value  = auto ? auto.name : '';
-  $('autoTask').value  = auto ? auto.task : '';
-  $('autoStop').value  = auto ? (auto.stopCondition || '') : '';
-  $('autoMaxRuns').value = auto ? (auto.maxRuns || 0) : 0;
-  $('autoModel').value = auto ? (auto.model || '') : '';
+  $('autoId').value = auto ? auto.id : '';
+  $('autoName').value = auto ? auto.name : '';
+  $('autoTask').value = auto ? auto.task : '';
+  $('autoStop').value = auto ? auto.stopCondition || '' : '';
+  $('autoMaxRuns').value = auto ? auto.maxRuns || 0 : 0;
+  $('autoModel').value = auto ? auto.model || '' : '';
   $('autoFormTitle').textContent = auto ? 'Modifica Automazione' : 'Nuova Automazione';
 
   if (auto?.scheduleType === 'daily') {
-    $('radioDaily').checked    = true;
+    $('radioDaily').checked = true;
     $('radioInterval').checked = false;
     $('schedInterval').classList.add('hidden');
     $('schedDaily').classList.remove('hidden');
     $('autoTime').value = auto.time || '09:00';
-    document.querySelectorAll('.day-cb').forEach(cb => {
+    document.querySelectorAll('.day-cb').forEach((cb) => {
       cb.checked = (auto.days || []).map(Number).includes(parseInt(cb.value));
     });
   } else {
     $('radioInterval').checked = true;
-    $('radioDaily').checked    = false;
+    $('radioDaily').checked = false;
     $('schedInterval').classList.remove('hidden');
     $('schedDaily').classList.add('hidden');
     if (auto?.intervalMinutes) {
       // Cerca unità migliore
       if (auto.intervalMinutes % 1440 === 0) {
-        $('autoIntervalVal').value  = auto.intervalMinutes / 1440;
+        $('autoIntervalVal').value = auto.intervalMinutes / 1440;
         $('autoIntervalUnit').value = '1440';
       } else if (auto.intervalMinutes % 60 === 0) {
-        $('autoIntervalVal').value  = auto.intervalMinutes / 60;
+        $('autoIntervalVal').value = auto.intervalMinutes / 60;
         $('autoIntervalUnit').value = '60';
       } else {
-        $('autoIntervalVal').value  = auto.intervalMinutes;
+        $('autoIntervalVal').value = auto.intervalMinutes;
         $('autoIntervalUnit').value = '1';
       }
     } else {
-      $('autoIntervalVal').value  = 1;
+      $('autoIntervalVal').value = 1;
       $('autoIntervalUnit').value = '60';
     }
   }
@@ -1490,16 +1422,18 @@ function openAutoForm(auto) {
 }
 
 async function getAutoById(id) {
-  return new Promise(r => chrome.storage.local.get('automations', d => {
-    r((d.automations || []).find(a => a.id === id) || null);
-  }));
+  return new Promise((r) =>
+    chrome.storage.local.get('automations', (d) => {
+      r((d.automations || []).find((a) => a.id === id) || null);
+    })
+  );
 }
 
 async function renderAutomations() {
   const list = $('autoList');
   list.innerHTML = '';
-  const automations = await new Promise(r =>
-    chrome.storage.local.get('automations', d => r(d.automations || []))
+  const automations = await new Promise((r) =>
+    chrome.storage.local.get('automations', (d) => r(d.automations || []))
   );
 
   if (automations.length === 0) {
@@ -1507,17 +1441,18 @@ async function renderAutomations() {
     return;
   }
 
-  automations.forEach(a => {
+  automations.forEach((a) => {
     const card = document.createElement('div');
     card.className = `auto-item${a.active ? '' : ' auto-paused'}`;
 
-    const schedLabel = a.scheduleType === 'interval'
-      ? formatInterval(a.intervalMinutes)
-      : `${a.time} (${formatDays(a.days)})`;
+    const schedLabel =
+      a.scheduleType === 'interval'
+        ? formatInterval(a.intervalMinutes)
+        : `${a.time} (${formatDays(a.days)})`;
 
-    const lastRun  = a.lastRun  ? new Date(a.lastRun).toLocaleString('it-IT')  : '—';
-    const nextRun  = a.nextRun  ? new Date(a.nextRun).toLocaleString('it-IT')  : '—';
-    const runs     = a.maxRuns > 0 ? `${a.runsCount || 0}/${a.maxRuns}` : (a.runsCount || 0);
+    const lastRun = a.lastRun ? new Date(a.lastRun).toLocaleString('it-IT') : '—';
+    const nextRun = a.nextRun ? new Date(a.nextRun).toLocaleString('it-IT') : '—';
+    const runs = a.maxRuns > 0 ? `${a.runsCount || 0}/${a.maxRuns}` : a.runsCount || 0;
 
     card.innerHTML = `
       <div class="auto-item-header">
@@ -1527,7 +1462,7 @@ async function renderAutomations() {
       <div class="auto-meta">🕐 ${schedLabel} &nbsp;·&nbsp; Esecuzioni: ${runs}</div>
       <div class="auto-meta">Ultimo run: ${lastRun}</div>
       <div class="auto-meta">Prossimo: ${nextRun}</div>
-      ${a.lastResult && a.lastResult !== 'In esecuzione...' ? `<div class="auto-result">${esc(a.lastResult.substring(0,120))}</div>` : ''}
+      ${a.lastResult && a.lastResult !== 'In esecuzione...' ? `<div class="auto-result">${esc(a.lastResult.substring(0, 120))}</div>` : ''}
       <div class="auto-actions">
         <button class="btn-secondary btn-sm auto-btn-toggle" data-id="${a.id}" data-active="${a.active}">${a.active ? '⏸ Pausa' : '▶ Riprendi'}</button>
         <button class="btn-secondary btn-sm auto-btn-run"    data-id="${a.id}">⚡ Esegui ora</button>
@@ -1539,29 +1474,34 @@ async function renderAutomations() {
   });
 
   // Event listeners sui bottoni delle card
-  list.querySelectorAll('.auto-btn-toggle').forEach(btn => {
+  list.querySelectorAll('.auto-btn-toggle').forEach((btn) => {
     btn.addEventListener('click', async () => {
-      const id     = parseInt(btn.dataset.id);
+      const id = parseInt(btn.dataset.id);
       const active = btn.dataset.active === 'true';
       await chrome.runtime.sendMessage({ type: 'TOGGLE_AUTOMATION', id, active: !active });
       renderAutomations();
     });
   });
-  list.querySelectorAll('.auto-btn-run').forEach(btn => {
+  list.querySelectorAll('.auto-btn-run').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const id = parseInt(btn.dataset.id);
-      await chrome.runtime.sendMessage({ type: 'RUN_AUTOMATION_NOW', id });
+      try {
+        await rpc({ type: 'RUN_AUTOMATION_NOW', id });
+      } catch (e) {
+        showError(e);
+        return;
+      }
       btn.textContent = '⏳ Avviato';
       btn.disabled = true;
     });
   });
-  list.querySelectorAll('.auto-btn-edit').forEach(btn => {
+  list.querySelectorAll('.auto-btn-edit').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const auto = await getAutoById(parseInt(btn.dataset.id));
       if (auto) openAutoForm(auto);
     });
   });
-  list.querySelectorAll('.auto-btn-del').forEach(btn => {
+  list.querySelectorAll('.auto-btn-del').forEach((btn) => {
     btn.addEventListener('click', async () => {
       if (!confirm('Eliminare questa automazione?')) return;
       await chrome.runtime.sendMessage({ type: 'DELETE_AUTOMATION', id: parseInt(btn.dataset.id) });
@@ -1572,21 +1512,18 @@ async function renderAutomations() {
 
 function formatInterval(minutes) {
   if (!minutes) return '—';
-  if (minutes % 1440 === 0) return `Ogni ${minutes / 1440} giorn${minutes / 1440 === 1 ? 'o' : 'i'}`;
-  if (minutes % 60  === 0) return `Ogni ${minutes / 60} or${minutes / 60 === 1 ? 'a' : 'e'}`;
+  if (minutes % 1440 === 0)
+    return `Ogni ${minutes / 1440} giorn${minutes / 1440 === 1 ? 'o' : 'i'}`;
+  if (minutes % 60 === 0) return `Ogni ${minutes / 60} or${minutes / 60 === 1 ? 'a' : 'e'}`;
   return `Ogni ${minutes} minuti`;
 }
 
 function formatDays(days) {
   if (!days || days.length === 0) return 'nessun giorno';
-  const names = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
-  return days.map(Number).sort().map(d => names[d] ?? d).join(' ');
+  const names = ['Dom', 'Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab'];
+  return days
+    .map(Number)
+    .sort()
+    .map((d) => names[d] ?? d)
+    .join(' ');
 }
-
-// Enter per inviare
-$('taskInput').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault();
-    if (!agentRunning || awaitingReply) $('btnStart').click();
-  }
-});

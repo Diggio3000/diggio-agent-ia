@@ -2,16 +2,15 @@
 // Gestione schede multiple
 
 export class TabManager {
-
   static async getAllTabs() {
     const tabs = await chrome.tabs.query({ currentWindow: true });
-    return tabs.map(t => ({
-      id:      t.id,
-      title:   t.title?.substring(0, 60) ?? 'Senza titolo',
-      url:     t.url ?? '',
+    return tabs.map((t) => ({
+      id: t.id,
+      title: t.title?.substring(0, 60) ?? 'Senza titolo',
+      url: t.url ?? '',
       favicon: t.favIconUrl ?? '',
-      active:  t.active,
-      index:   t.index
+      active: t.active,
+      index: t.index
     }));
   }
 

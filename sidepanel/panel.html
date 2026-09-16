@@ -1,523 +1,709 @@
-<!DOCTYPE html>
-<html lang="it">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Diggio Agent IA</title>
-  <link rel="stylesheet" href="panel.css">
-</head>
-<body>
-
-  <!-- Header -->
-  <header>
-    <div class="logo">
-      <img src="../icons/icon48.png" width="22" height="22" alt="Diggio">
-      <span>Diggio Agent IA</span>
-    </div>
-    <div class="header-btns">
-      <button id="btnTemplates"   class="icon-btn" title="Template task salvati">⭐</button>
-      <button id="btnAutomations" class="icon-btn" title="Automazioni programmate">🤖</button>
-      <button id="btnHistory"     class="icon-btn" title="Cronologia chat">🕐</button>
-      <button id="btnTabs"        class="icon-btn" title="Schede">🗂️</button>
-      <button id="btnSettings"    class="icon-btn" title="Impostazioni">⚙️</button>
-      <button id="btnGuide"       class="icon-btn" title="Guida all'uso">❓</button>
-    </div>
-  </header>
-
-  <!-- Pannello Guida -->
-  <div id="guidePanel" class="panel-drawer guide-panel hidden">
-
-    <div class="guide-hero">
-      <div class="guide-hero-title">Diggio Agent IA</div>
-      <div class="guide-hero-sub">Il tuo agente AI che controlla Chrome al posto tuo</div>
-    </div>
-
-    <!-- INIZIO -->
-    <div class="guide-section">
-      <div class="guide-h2">🚀 Come iniziare</div>
-      <div class="guide-item">1. Clicca <strong>⚙️ Impostazioni</strong> e scegli il <strong>Provider AI</strong> (OpenAI, Groq, OpenRouter, Ollama…)</div>
-      <div class="guide-item">2. Incolla la tua <strong>API Key</strong> del provider scelto</div>
-      <div class="guide-item">3. Premi <strong>🔄</strong> per caricare i modelli disponibili oppure scrivili manualmente</div>
-      <div class="guide-item">4. Clicca <strong>💾 Salva e testa</strong> per verificare che funzioni</div>
-      <div class="guide-item">5. Scrivi un task nella textarea e premi <strong>▶ Avvia</strong> oppure <span class="guide-key">Enter</span></div>
-    </div>
-
-    <!-- MODALITÀ -->
-    <div class="guide-section">
-      <div class="guide-h2">⚡ Modalità di esecuzione</div>
-      <div class="guide-item"><span class="guide-tag tag-blue">⚡ Auto</span> L'agente esegue tutte le azioni autonomamente senza chiedere conferma</div>
-      <div class="guide-item"><span class="guide-tag tag-pink">🔔 Chiedi prima</span> Prima di ogni azione ti mostra cosa sta per fare e aspetta la tua approvazione — utile per operazioni delicate</div>
-      <div class="guide-item">Clicca il bottone modalità in basso a sinistra per alternare tra le due</div>
-    </div>
-
-    <!-- TOOLBAR -->
-    <div class="guide-section">
-      <div class="guide-h2">🔘 Bottoni toolbar (sopra la textarea)</div>
-      <div class="guide-item"><strong>🛠️ Strumenti</strong> — apre il pannello con tutti gli strumenti guidati</div>
-      <div class="guide-item"><strong>📖 Riassumi</strong> — genera automaticamente un prompt per riassumere la pagina aperta</div>
-      <div class="guide-item"><strong>🌐 Traduci</strong> — genera un prompt per tradurre e analizzare la pagina corrente</div>
-      <div class="guide-item"><strong>📊 Esporta</strong> — esporta la sessione in <em>CSV</em> o <em>JSON</em></div>
-      <div class="guide-item"><strong>🖼️ Allega</strong> — allega un'immagine come riferimento visivo (es. il pezzo da cercare)</div>
-      <div class="guide-item"><strong>📸 Screenshot</strong> — cattura uno screenshot della pagina attiva</div>
-      <div class="guide-item"><strong>📄 Report</strong> — scarica la sessione come file HTML completo</div>
-      <div class="guide-item"><strong>🗑️ Nuova conversazione</strong> — pulisce chat e memoria dell'agente, salvando la sessione nella cronologia</div>
-    </div>
-
-    <!-- HEADER -->
-    <div class="guide-section">
-      <div class="guide-h2">🔘 Bottoni header</div>
-      <div class="guide-item"><strong>⭐ Template</strong> — salva prompt riutilizzabili; clicca un template per inserirlo nella textarea</div>
-      <div class="guide-item"><strong>🤖 Automazioni</strong> — crea task programmati che girano in background anche a pannello chiuso</div>
-      <div class="guide-item"><strong>🕐 Cronologia</strong> — sessioni precedenti con ricerca testuale; clicca per riaprirle</div>
-      <div class="guide-item"><strong>🗂️ Schede</strong> — scegli su quale scheda Chrome l'agente deve lavorare</div>
-      <div class="guide-item"><strong>⚙️ Impostazioni</strong> — API Key e modello AI</div>
-    </div>
-
-    <!-- STRUMENTI -->
-    <div class="guide-section">
-      <div class="guide-h2">🛠️ Strumenti guidati</div>
-      <div class="guide-h3">💰 Scraper Prezzi</div>
-      <div class="guide-item">Inserisci URL + cosa estrarre. Con <em>Loop</em> attivo monitora la pagina fino a una condizione (es. prezzo &lt; 50€)</div>
-      <div class="guide-h3">⚖️ Confronto Prodotti</div>
-      <div class="guide-item">Inserisci 2 o 3 URL: l'agente visita ogni prodotto e genera una tabella comparativa con consiglio finale</div>
-      <div class="guide-h3">📝 Form Filler</div>
-      <div class="guide-item">Salva i tuoi dati ricorrenti (nome, email, tel, indirizzo) — l'agente compila automaticamente qualsiasi form</div>
-      <div class="guide-h3">🔍 Ricerca Google</div>
-      <div class="guide-item">Cerca su Google e ottieni i link dei risultati, oppure fai aprire e leggere i siti all'agente</div>
-      <div class="guide-h3">📈 Analisi SEO Completa</div>
-      <div class="guide-item">Analizza meta tag, heading, link, immagini, robots.txt, sitemap, velocità, mobile e schema. Produce un report con punteggio 0-100</div>
-      <div class="guide-h3">🛡️ Controllo Sicurezza Sito</div>
-      <div class="guide-item">Controlla il sito su VirusTotal, Google Safe Browsing, URLhaus, SSLLabs, SecurityHeaders. Include <strong>scansione del codice sorgente</strong> live per rilevare: codice offuscato, iframe nascosti, crypto miner, keylogger, redirect sospetti e payload in base64</div>
-      <div class="guide-h3">🕵️ Verifica Sito Truffa</div>
-      <div class="guide-item">Analizza 15 indicatori di truffa (prezzi, contatti, P.IVA, grammatica, policy, pagamenti…) + cerca recensioni su Google, Trustpilot, WHOIS e Wayback Machine. Verdetto: Legittimo / Sospetto / Truffa</div>
-      <div class="guide-h3">📣 Analisi Google Ads</div>
-      <div class="guide-item">Analizza campagne, parole chiave, termini di ricerca e annunci del tuo account Google Ads, con correzioni opzionali sempre confermate da te</div>
-      <div class="guide-h3">📚 Memoria Siti</div>
-      <div class="guide-item">Elenco degli appunti che l'agente ha imparato sui siti visitati — puoi dimenticare un sito singolo o tutti</div>
-    </div>
-
-    <!-- AUTOMAZIONI -->
-    <div class="guide-section">
-      <div class="guide-h2">🤖 Automazioni</div>
-      <div class="guide-item">Le automazioni girano in background con <strong>Chrome Alarms</strong> anche a pannello chiuso. Sopravvivono al riavvio del browser.</div>
-      <div class="guide-item"><strong>Intervallo fisso</strong> — ogni N minuti, ore o giorni</div>
-      <div class="guide-item"><strong>Orario specifico</strong> — alle HH:MM nei giorni della settimana che scegli</div>
-      <div class="guide-item"><strong>Max esecuzioni</strong> — 0 = infinito; al raggiungimento del limite l'automazione si disattiva da sola</div>
-      <div class="guide-item"><strong>Condizione di stop</strong> — testo descrittivo che l'agente usa per capire quando smettere (es. "fermati quando il prezzo scende sotto 100€")</div>
-      <div class="guide-item">Al completamento arriva una <strong>notifica Chrome</strong> con il risultato</div>
-    </div>
-
-    <!-- AZIONI AGENTE -->
-    <div class="guide-section">
-      <div class="guide-h2">⚡ Azioni disponibili all'agente</div>
-      <div class="guide-cmd"><code>navigate(url)</code> naviga a un URL</div>
-      <div class="guide-cmd"><code>click(selector)</code> clicca un elemento CSS</div>
-      <div class="guide-cmd"><code>click_text(testo)</code> clicca per testo visibile</div>
-      <div class="guide-cmd"><code>type(selector, testo)</code> digita in un campo</div>
-      <div class="guide-cmd"><code>select_option(selector, valore)</code> seleziona in un &lt;select&gt;</div>
-      <div class="guide-cmd"><code>submit_form(selector)</code> invia un form</div>
-      <div class="guide-cmd"><code>read_page()</code> legge il testo completo + tutti i link</div>
-      <div class="guide-cmd"><code>analyze_page()</code> analisi strutturata: scroll, prodotti, filtri, paginazione</div>
-      <div class="guide-cmd"><code>scroll_screenshot(dir, px)</code> scrolla e cattura screenshot</div>
-      <div class="guide-cmd"><code>screenshot()</code> cattura screenshot</div>
-      <div class="guide-cmd"><code>execute_js(codice)</code> esegue JavaScript nella pagina e restituisce il risultato</div>
-      <div class="guide-cmd"><code>click_coords(x, y)</code> click fisico su coordinate schermo</div>
-      <div class="guide-cmd"><code>mark_page()</code> Set-of-Marks: numera gli elementi cliccabili (badge + lista)</div>
-      <div class="guide-cmd"><code>click_element(n)</code> clicca l'elemento numerato n di mark_page</div>
-      <div class="guide-cmd"><code>zoom(x, y)</code> screenshot ingrandito di una regione (per testo piccolo)</div>
-      <div class="guide-cmd"><code>press_key(tasto)</code> preme un tasto (Enter, Escape, Tab, frecce…)</div>
-      <div class="guide-cmd"><code>read_console()</code> legge la console del browser (errori JS, warning)</div>
-      <div class="guide-cmd"><code>read_network()</code> riepilogo richieste di rete (XHR, script, errori 404/500)</div>
-      <div class="guide-cmd"><code>scroll_within(selector, dir, px)</code> scrolla dentro un elemento</div>
-      <div class="guide-cmd"><code>open_tab(url)</code> apre URL in nuova scheda del gruppo</div>
-      <div class="guide-cmd"><code>open_tabs([url1, url2…])</code> apre più schede raggruppate</div>
-      <div class="guide-cmd"><code>dismiss_popups()</code> chiude cookie banner e popup</div>
-      <div class="guide-cmd"><code>get_links()</code> ottieni tutti i link della pagina</div>
-      <div class="guide-cmd"><code>get_url()</code> URL corrente</div>
-      <div class="guide-cmd"><code>scroll(dir)</code> scrolla senza screenshot</div>
-      <div class="guide-cmd"><code>wait(secondi)</code> attendi N secondi</div>
-      <div class="guide-cmd"><code>save_report()</code> scarica il report HTML della sessione</div>
-      <div class="guide-cmd"><code>remember(nota, sito?)</code> salva un appunto permanente su come usare un sito</div>
-      <div class="guide-cmd"><code>ask_user(domanda)</code> l'agente ti fa una domanda e aspetta la tua risposta</div>
-      <div class="guide-cmd"><code>done(messaggio)</code> dichiara il task completato con risultato</div>
-    </div>
-
-    <!-- MEMORIA E INTERATTIVITÀ -->
-    <div class="guide-section">
-      <div class="guide-h2">🧠 Memoria e interattività</div>
-      <div class="guide-item">L'agente <strong>ricorda i task precedenti</strong> della stessa conversazione: puoi fare domande di follow-up ("apri il secondo che hai trovato") senza ripetere tutto</div>
-      <div class="guide-item">Con <code>ask_user</code> l'agente può <strong>farti domande a metà task</strong>: il bottone diventa <strong>↩ Rispondi</strong> — scrivi la risposta e premi Enter</div>
-      <div class="guide-item"><strong>📚 Memoria Siti</strong>: l'agente impara come si usa ogni sito (selettori, trucchi, pattern URL) e riusa gli appunti alle visite successive — gestibili in 🛠️ Strumenti</div>
-      <div class="guide-item"><strong>🗑️ Nuova conversazione</strong> azzera chat e memoria della conversazione (gli appunti sui siti restano)</div>
-    </div>
-
-    <!-- PRECISIONE -->
-    <div class="guide-section">
-      <div class="guide-h2">🎯 Precisione (v1.3)</div>
-      <div class="guide-item"><strong>Set-of-Marks</strong>: con <code>mark_page()</code> l'agente numera visivamente tutti gli elementi cliccabili (badge viola) e clicca per numero con <code>click_element(n)</code> — il metodo più affidabile su siti complessi. Funziona con tutti i modelli (c'è anche la lista testuale)</div>
-      <div class="guide-item"><strong>Zoom</strong>: <code>zoom(x, y)</code> cattura una regione ingrandita per leggere prezzi, codici e testo piccolo</div>
-      <div class="guide-item"><strong>🔧 Tool calling nativo</strong> (⚙️ Impostazioni): le azioni diventano chiamate funzione strutturate — zero errori di parsing. Fallback automatico al formato classico se il modello non lo supporta</div>
-      <div class="guide-item"><strong>🔬 Analisi tecnica</strong>: come DevTools — <code>read_console()</code> legge errori JS e warning, <code>read_network()</code> mostra chiamate XHR/fetch, script caricati e risorse fallite. Lo strumento 📈 SEO le usa automaticamente</div>
-      <div class="guide-item"><strong>🟣 Gruppo scheda agente</strong>: all'avvio la scheda controllata dall'agente entra nel gruppo viola "🤖 Diggio Agent" — vedi sempre dove sta lavorando</div>
-    </div>
-
-    <!-- GOOGLE ADS -->
-    <div class="guide-section">
-      <div class="guide-h2">📣 Google Ads</div>
-      <div class="guide-item">Strumento <strong>📣 Analisi Google Ads</strong> in 🛠️ Strumenti: analizza campagne, keyword, termini di ricerca e annunci del tuo account (devi essere loggato)</div>
-      <div class="guide-item">Con <strong>🔧 correzioni</strong> attivo, l'agente propone e applica fix — ma <strong>ogni modifica su ads.google.com richiede la tua conferma</strong>, anche in modalità Auto (protezione budget)</div>
-    </div>
-
-    <!-- MODELLI -->
-    <div class="guide-section">
-      <div class="guide-h2">🧠 Provider e modelli supportati</div>
-      <div class="guide-item"><span class="guide-tag tag-blue">OpenAI</span> gpt-4o, gpt-4o-mini, gpt-4-turbo — richiede account e credito</div>
-      <div class="guide-item"><span class="guide-tag tag-pink">Anthropic</span> claude-opus-4-5, claude-sonnet-4-5, claude-haiku-4-5 — API Key da console.anthropic.com</div>
-      <div class="guide-item"><span class="guide-tag tag-green">Groq</span> llama-3.3-70b, mixtral-8x7b, gemma2-9b — gratis con limiti</div>
-      <div class="guide-item"><span class="guide-tag tag-purple">OpenRouter</span> Accesso a centinaia di modelli con un'unica API Key (incluso Claude)</div>
-      <div class="guide-item"><span class="guide-tag tag-blue">Perplexity</span> sonar, sonar-pro, sonar-reasoning — con ricerca web integrata</div>
-      <div class="guide-item"><span class="guide-tag tag-green">Ollama (locale)</span> Qualsiasi modello installato sul tuo PC — 100% privato, nessun costo. Avvia Ollama con <code>OLLAMA_ORIGINS=chrome-extension://*</code></div>
-      <div class="guide-item"><span class="guide-tag tag-purple">Ollama.com (cloud)</span> Modelli cloud di Ollama con API Key da ollama.com/settings/keys</div>
-      <div class="guide-item"><span class="guide-tag tag-green">LM Studio (locale)</span> Modelli sul tuo PC via LM Studio — attiva il server (Developer → Start Server) con CORS</div>
-      <div class="guide-item"><span class="guide-tag tag-blue">Endpoint Custom</span> Qualsiasi server OpenAI-compatible (Open WebUI, llama.cpp…)</div>
-      <div class="guide-item">Per vision (immagini): usa modelli che la supportano — gpt-4o, claude-3, llava, gemma3, llama-3.2-vision</div>
-    </div>
-
-    <!-- CONTATTI -->
-    <div class="guide-section">
-      <div class="guide-h2">👤 Creatore</div>
-      <div class="guide-contact">
-        <div class="contact-name">Antonio Di Giorgio</div>
-        <div class="contact-alias">— per tutti <strong>Diggio3000</strong></div>
-        <a href="https://www.diggio3000.it" target="_blank" rel="noopener" class="contact-email">🌐 www.diggio3000.it</a>
-        <a href="mailto:diggiotelefonia@gmail.com" class="contact-email">📧 diggiotelefonia@gmail.com</a>
-        <div class="contact-note">Per supporto, segnalazioni o collaborazioni</div>
-      </div>
-    </div>
-
-  </div>
-
-  <!-- Pannello Automazioni -->
-  <div id="automationsPanel" class="panel-drawer auto-panel hidden">
-    <div class="drawer-header">
-      <span>🤖 Automazioni</span>
-      <button id="btnNewAuto" class="btn-secondary btn-sm">+ Nuova</button>
-    </div>
-
-    <!-- Lista automazioni salvate -->
-    <div id="autoList" class="auto-list"></div>
-
-    <!-- Form creazione / modifica -->
-    <div id="autoForm" class="auto-form hidden">
-      <div class="tool-section-title" id="autoFormTitle">Nuova Automazione</div>
-      <input type="hidden" id="autoId">
-
-      <input id="autoName" type="text" class="tool-input" placeholder="Nome (es: Controlla prezzo TV)">
-      <textarea id="autoTask" class="tool-textarea" placeholder="Task da eseguire..." rows="3"></textarea>
-
-      <!-- Tipo schedule -->
-      <div class="auto-radio-group">
-        <label class="auto-radio"><input type="radio" name="schedType" value="interval" id="radioInterval" checked> Ogni intervallo fisso</label>
-        <label class="auto-radio"><input type="radio" name="schedType" value="daily"    id="radioDaily"> Orario specifico</label>
-      </div>
-
-      <!-- Sezione intervallo -->
-      <div id="schedInterval" class="auto-schedule-section">
-        <div class="tool-row">
-          <input id="autoIntervalVal" type="number" min="1" value="1" class="tool-input" style="flex:1" placeholder="1">
-          <select id="autoIntervalUnit" class="tool-input" style="flex:2">
-            <option value="1">minuti</option>
-            <option value="60" selected>ore</option>
-            <option value="1440">giorni</option>
-          </select>
+<!doctype html>
+<html lang="it" data-theme="light">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Diggio Agent IA</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true">D<span>•</span></span>
+        <div>
+          <strong>Diggio<span class="brand-ai"> AI</span></strong
+          ><small>Il tuo spazio per fare.</small>
         </div>
       </div>
-
-      <!-- Sezione orario + giorni -->
-      <div id="schedDaily" class="auto-schedule-section hidden">
-        <input id="autoTime" type="time" class="tool-input" value="09:00">
-        <div class="auto-days">
-          <label class="auto-day"><input type="checkbox" class="day-cb" value="1" checked> Lun</label>
-          <label class="auto-day"><input type="checkbox" class="day-cb" value="2" checked> Mar</label>
-          <label class="auto-day"><input type="checkbox" class="day-cb" value="3" checked> Mer</label>
-          <label class="auto-day"><input type="checkbox" class="day-cb" value="4" checked> Gio</label>
-          <label class="auto-day"><input type="checkbox" class="day-cb" value="5" checked> Ven</label>
-          <label class="auto-day"><input type="checkbox" class="day-cb" value="6"> Sab</label>
-          <label class="auto-day"><input type="checkbox" class="day-cb" value="0"> Dom</label>
-        </div>
+      <div class="header-actions">
+        <button id="btnTheme" class="icon-btn" title="Cambia tema">◐</button
+        ><button
+          id="btnSettings"
+          class="icon-btn"
+          title="Connessioni e preferenze"
+          data-drawer="settingsPanel"
+        >
+          ⚙
+        </button>
       </div>
-
-      <!-- Stop condition + max runs + modello -->
-      <input id="autoStop" type="text" class="tool-input" placeholder="Condizione di stop (opzionale, es: prezzo &lt; 200€)">
-      <div class="tool-row">
-        <input id="autoMaxRuns" type="number" min="0" value="0" class="tool-input" style="flex:1" placeholder="Max esec. (0=∞)">
-        <input id="autoModel" type="text" class="tool-input" style="flex:2" placeholder="Modello (es: gpt-4o-mini)">
-      </div>
-      <div class="tool-row">
-        <button id="btnAutoCancel" class="btn-secondary btn-sm" style="flex:1">Annulla</button>
-        <button id="btnAutoSave"   class="btn-primary btn-sm"   style="flex:2">💾 Salva e attiva</button>
-      </div>
+    </header>
+    <nav class="main-nav" aria-label="Navigazione principale">
+      <button id="btnChat" class="selected">Chat</button
+      ><button id="btnTools" data-drawer="toolsPanel">Strumenti</button
+      ><button id="btnAutomations" data-drawer="automationsPanel">Attività</button
+      ><button id="btnHistory" data-drawer="historyPanel">Cronologia</button>
+    </nav>
+    <div class="connection-strip">
+      <span id="statusDot" class="status-dot"></span
+      ><span id="connectionLabel">Configura il tuo modello</span><span id="progressText"></span>
     </div>
-  </div>
-
-  <!-- Pannello Template Salvati -->
-  <div id="templatesPanel" class="panel-drawer hidden">
-    <div class="drawer-header">
-      <span>⭐ Template Salvati</span>
-      <button id="btnAddTemplate" class="btn-secondary btn-sm">+ Salva prompt</button>
+    <div id="appNotice" class="notice" role="alert" hidden></div>
+    <div id="guidePanel" class="panel-drawer hidden">
+      <div class="drawer-header">Come usare Diggio</div>
+      <h2>Una chat, tre modi di lavorare.</h2>
+      <p>
+        <strong>Chat</strong>: scrivi, ragiona e analizza gli allegati. Il browser non viene
+        controllato.
+      </p>
+      <p>
+        <strong>Agente autonomo</strong>: usa la scheda scelta per svolgere il compito. JavaScript e
+        azioni sui domini sensibili richiedono conferma.
+      </p>
+      <p>
+        <strong>Con approvazione</strong>: esamina e modifica i parametri di ogni comando prima di
+        eseguirlo. Puoi saltarlo o interrompere l’attività.
+      </p>
+      <h3>Collega il tuo modello</h3>
+      <p>
+        Apri Impostazioni, scegli il provider oppure Endpoint custom. Inserisci l’indirizzo
+        dell’API, l’eventuale chiave e il modello. Carica l’elenco o scrivi il nome manualmente. Per
+        i modelli personalizzati puoi dichiarare il supporto immagini.
+      </p>
+      <h3>Conversazioni e memoria</h3>
+      <p>
+        Le conversazioni vengono salvate sul dispositivo. Riprendile dalla Cronologia. “Nuova chat”
+        separa il contesto. Le preferenze personali si gestiscono nelle Impostazioni; le note dei
+        siti negli Strumenti.
+      </p>
+      <h3>Attività programmate</h3>
+      <p>
+        Ogni automazione usa una scheda dedicata e la connessione salvata alla creazione. Il
+        risultato compare in Cronologia. La condizione di arresto viene valutata dal modello sulla
+        base delle osservazioni: verifica le evidenze per decisioni importanti.
+      </p>
+      <p>
+        Quando serve una risposta o una conferma, ricevi una notifica e puoi aprire il pannello.
+        Stop impedisce nuove azioni; non annulla quelle già eseguite.
+      </p>
+      <h3>Dati e limiti</h3>
+      <p>
+        Impostazioni e chiavi restano nello storage locale dell’estensione, senza sincronizzazione
+        Chrome. I contenuti necessari al compito vengono inviati al provider configurato.
+        Conserviamo fino a 30 conversazioni entro il limite di spazio. I report di analisi indicano
+        ciò che è stato osservato e non sostituiscono una verifica specialistica.
+      </p>
+      <p>Invio per inviare · Maiusc+Invio per andare a capo · Esc per chiudere un pannello.</p>
     </div>
-    <input type="text" id="templateSearchInput" class="search-input" placeholder="🔍 Cerca template...">
-    <div id="templateList" class="template-list"></div>
-  </div>
-
-  <!-- Pannello Strumenti -->
-  <div id="toolsPanel" class="panel-drawer tools-panel hidden">
-
-    <!-- Sezione 1: Scraper Prezzi + Loop -->
-    <div class="tool-section">
-      <div class="tool-section-title">💰 Scraper Prezzi</div>
-      <input id="scraperUrl" type="text" class="tool-input" placeholder="URL pagina o prodotto...">
-      <input id="scraperTarget" type="text" class="tool-input" placeholder="Cosa estrarre (es: prezzo, disponibilità)">
-      <label class="tool-check"><input type="checkbox" id="scraperLoop"> 🔄 Loop — monitora fino a condizione</label>
-      <input id="scraperCondition" type="text" class="tool-input tool-input-hidden" placeholder="Condizione di stop (es: prezzo &lt; 50€)">
-      <button id="btnScraperGenera" class="btn-primary btn-sm" style="width:100%">🔍 Genera task</button>
-    </div>
-
-    <div class="tool-divider"></div>
-
-    <!-- Sezione 2: Confronto Prodotti -->
-    <div class="tool-section">
-      <div class="tool-section-title">⚖️ Confronto Prodotti</div>
-      <input id="confrontoUrl1" type="text" class="tool-input" placeholder="URL prodotto 1">
-      <input id="confrontoUrl2" type="text" class="tool-input" placeholder="URL prodotto 2">
-      <input id="confrontoUrl3" type="text" class="tool-input" placeholder="URL prodotto 3 (opzionale)">
-      <button id="btnConfrontoGenera" class="btn-primary btn-sm" style="width:100%">⚖️ Confronta</button>
-    </div>
-
-    <div class="tool-divider"></div>
-
-    <!-- Sezione 3: Form Filler -->
-    <div class="tool-section">
-      <div class="tool-section-title">📝 Form Filler</div>
-      <textarea id="formFillerData" class="tool-textarea" placeholder="Dati per compilare form&#10;es:&#10;Nome: Mario Rossi&#10;Email: mario@esempio.it&#10;Telefono: 333 1234567" rows="4"></textarea>
-      <div class="tool-row">
-        <button id="btnFormFillerSave" class="btn-secondary btn-sm">💾 Salva</button>
-        <button id="btnFormFillerGenera" class="btn-primary btn-sm" style="flex:1">📝 Compila form</button>
-      </div>
-    </div>
-
-    <div class="tool-divider"></div>
-
-    <!-- Sezione 4: Ricerca Google -->
-    <div class="tool-section">
-      <div class="tool-section-title">🔍 Ricerca Google</div>
-      <input id="googleQuery" type="text" class="tool-input" placeholder="Cosa cercare su Google...">
-      <label class="tool-check"><input type="checkbox" id="googleLinksOnly"> Solo estrai link (non aprire i siti)</label>
-      <button id="btnGoogleGenera" class="btn-primary btn-sm" style="width:100%">🔍 Cerca</button>
-    </div>
-
-    <div class="tool-divider"></div>
-
-    <!-- Sezione 5: Analisi SEO -->
-    <div class="tool-section">
-      <div class="tool-section-title">📈 Analisi SEO Completa</div>
-      <input id="seoUrl" type="text" class="tool-input" placeholder="URL del sito da analizzare...">
-      <div class="tool-checks-grid">
-        <label class="tool-check"><input type="checkbox" class="seo-cb" value="meta" checked> Meta tag</label>
-        <label class="tool-check"><input type="checkbox" class="seo-cb" value="headings" checked> Struttura H1-H6</label>
-        <label class="tool-check"><input type="checkbox" class="seo-cb" value="links" checked> Link interni/esterni</label>
-        <label class="tool-check"><input type="checkbox" class="seo-cb" value="images" checked> Immagini senza alt</label>
-        <label class="tool-check"><input type="checkbox" class="seo-cb" value="robots" checked> robots.txt / sitemap</label>
-        <label class="tool-check"><input type="checkbox" class="seo-cb" value="speed" checked> Velocità percepita</label>
-        <label class="tool-check"><input type="checkbox" class="seo-cb" value="mobile" checked> Mobile friendliness</label>
-        <label class="tool-check"><input type="checkbox" class="seo-cb" value="schema"> Schema / dati strutturati</label>
-      </div>
-      <button id="btnSeoGenera" class="btn-primary btn-sm" style="width:100%">📈 Avvia analisi SEO</button>
-    </div>
-
-    <div class="tool-divider"></div>
-
-    <!-- Sezione 5b: Analisi Google Ads -->
-    <div class="tool-section">
-      <div class="tool-section-title">📣 Analisi Google Ads</div>
-      <select id="adsScope" class="tool-input">
-        <option value="full" selected>Analisi completa account</option>
-        <option value="campaigns">Solo campagne (budget, CTR, CPC)</option>
-        <option value="keywords">Solo parole chiave e termini di ricerca</option>
-        <option value="ads">Solo annunci (stato, rifiutati)</option>
+    <div id="settingsPanel" class="panel-drawer hidden">
+      <div class="drawer-header">Connessioni e preferenze</div>
+      <h2>Il tuo modello. La tua scelta.</h2>
+      <p class="muted">Collega un servizio cloud, locale o personalizzato.</p>
+      <label for="providerSelect">Servizio</label
+      ><select id="providerSelect">
+        <option value="openai">OpenAI</option>
+        <option value="anthropic">Anthropic</option>
+        <option value="groq">Groq</option>
+        <option value="openrouter">OpenRouter</option>
+        <option value="perplexity">Perplexity</option>
+        <option value="ollama">Ollama locale</option>
+        <option value="ollama_cloud">Ollama cloud</option>
+        <option value="lmstudio">LM Studio</option>
+        <option value="custom">Endpoint custom</option>
       </select>
-      <label class="tool-check"><input type="checkbox" id="adsFix"> 🔧 Proponi e applica correzioni (chiede conferma per ognuna)</label>
-      <div style="font-size:11px;color:#94a3b8;margin:2px 0 6px">Devi essere già loggato su ads.google.com in Chrome. Ogni modifica richiede la tua approvazione.</div>
-      <button id="btnAdsGenera" class="btn-primary btn-sm" style="width:100%">📣 Avvia analisi Ads</button>
-    </div>
-
-    <div class="tool-divider"></div>
-
-    <!-- Sezione 5c: Memoria Siti (apprendimento) -->
-    <div class="tool-section">
-      <div class="tool-section-title">📚 Memoria Siti (apprendimento)</div>
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Appunti che l'agente ha imparato sui siti (selettori funzionanti, trucchi, pattern URL). Li riusa automaticamente a ogni visita.</div>
-      <div id="siteKnowledgeList" class="template-list"></div>
-      <button id="btnClearKnowledge" class="btn-danger btn-sm" style="width:100%">🗑 Dimentica tutti i siti</button>
-    </div>
-
-    <div class="tool-divider"></div>
-
-    <!-- Sezione 6: Controllo Sicurezza -->
-    <div class="tool-section">
-      <div class="tool-section-title">🛡️ Controllo Sicurezza Sito</div>
-      <input id="secUrl" type="text" class="tool-input" placeholder="URL del sito da controllare...">
-      <div class="tool-checks-grid">
-        <label class="tool-check"><input type="checkbox" class="sec-cb" value="virustotal" checked> VirusTotal</label>
-        <label class="tool-check"><input type="checkbox" class="sec-cb" value="safebrowsing" checked> Google Safe Browsing</label>
-        <label class="tool-check"><input type="checkbox" class="sec-cb" value="urlhaus" checked> URLhaus / abuse.ch</label>
-        <label class="tool-check"><input type="checkbox" class="sec-cb" value="ssl" checked> Certificato SSL</label>
-        <label class="tool-check"><input type="checkbox" class="sec-cb" value="headers" checked> Header sicurezza</label>
-        <label class="tool-check"><input type="checkbox" class="sec-cb" value="source" checked> 🔬 Scansione codice sorgente</label>
+      <div id="customHint" class="callout" hidden>
+        Usa il tuo servizio compatibile. Puoi inserire l’URL base, l’endpoint completo oppure un
+        gateway PHP. Nessun server è preconfigurato.
       </div>
-      <button id="btnSecGenera" class="btn-primary btn-sm" style="width:100%">🛡️ Avvia controllo sicurezza</button>
-    </div>
-
-    <div class="tool-divider"></div>
-
-    <!-- Sezione 7: Verifica Sito Truffa -->
-    <div class="tool-section">
-      <div class="tool-section-title">🕵️ Verifica Sito Truffa</div>
-      <input id="scamUrl" type="text" class="tool-input" placeholder="URL del sito da verificare...">
-      <label class="tool-check"><input type="checkbox" id="scamDeep" checked> Analisi approfondita (cerca recensioni esterne)</label>
-      <button id="btnScamGenera" class="btn-primary btn-sm" style="width:100%">🕵️ Verifica legittimità</button>
-    </div>
-
-  </div>
-
-  <!-- Pannello Impostazioni -->
-  <div id="settingsPanel" class="panel-drawer hidden">
-
-    <label>Provider AI</label>
-    <select id="providerSelect">
-      <option value="openai">OpenAI</option>
-      <option value="anthropic">Anthropic (Claude)</option>
-      <option value="groq">Groq (gratis)</option>
-      <option value="openrouter">OpenRouter</option>
-      <option value="perplexity">Perplexity AI</option>
-      <option value="ollama">Ollama (locale)</option>
-      <option value="ollama_cloud">Ollama.com (cloud)</option>
-      <option value="lmstudio">LM Studio (locale)</option>
-      <option value="custom">Endpoint custom…</option>
-    </select>
-
-    <label style="margin-top:8px">Endpoint API</label>
-    <input type="text" id="apiEndpoint" placeholder="https://api.openai.com/v1/chat/completions" />
-
-    <label style="margin-top:8px">API Key</label>
-    <input type="password" id="apiKey" placeholder="sk-..." />
-
-    <label style="margin-top:8px">Modello</label>
-    <div class="tool-row" style="gap:6px">
-      <input type="text" id="modelManual" class="tool-input" placeholder="es: gpt-4o-mini" style="flex:1">
-      <button id="btnLoadModels" class="btn-secondary btn-sm" title="Carica modelli disponibili dall'endpoint">🔄</button>
-    </div>
-    <select id="modelSelect" class="hidden" style="margin-top:4px"></select>
-    <div id="modelLoadStatus" style="font-size:11px;color:var(--text-muted);margin-top:2px"></div>
-
-    <label class="tool-check" style="margin-top:8px"><input type="checkbox" id="nativeToolsCheck"> 🔧 Tool calling nativo (sperimentale)</label>
-    <div style="font-size:11px;color:var(--text-muted);margin:2px 0 6px">Azioni come chiamate funzione strutturate: niente errori di parsing. Se il modello non lo supporta, torna da solo al formato classico — funziona con tutti i modelli.</div>
-
-    <button id="btnSaveSettings" class="btn-primary" style="margin-top:10px">💾 Salva e testa</button>
-    <div id="testResult"></div>
-  </div>
-
-  <!-- Pannello Schede -->
-  <div id="tabsPanel" class="panel-drawer hidden">
-    <div class="drawer-header">
-      <span>Scheda target agente</span>
-      <button id="btnNewTab" class="btn-secondary btn-sm">+ Nuova</button>
-    </div>
-    <div id="tabsList" class="tabs-list"></div>
-  </div>
-
-  <!-- Pannello Cronologia -->
-  <div id="historyPanel" class="panel-drawer hidden">
-    <div class="drawer-header">
-      <span>Cronologia chat</span>
-      <button id="btnClearAllHistory" class="btn-danger btn-sm">🗑 Cancella tutto</button>
-    </div>
-    <input type="text" id="historySearch" class="search-input" placeholder="🔍 Cerca nella cronologia...">
-    <div id="historyList" class="history-list"></div>
-  </div>
-
-  <!-- Tab target badge -->
-  <div id="targetTabBadge" class="target-badge hidden">
-    <span id="targetTabName">Scheda attiva</span>
-    <button id="btnClearTarget" class="btn-clear">✕</button>
-  </div>
-
-  <!-- Area messaggi -->
-  <div id="messages" class="messages"></div>
-
-  <!-- Pannello approvazione azione (modalità chiedi prima) -->
-  <div id="approvalBar" class="approval-bar hidden">
-    <span id="approvalText">Eseguo questa azione?</span>
-    <div class="approval-btns">
-      <button id="btnSkip"    class="btn-secondary btn-sm">⏭ Salta</button>
-      <button id="btnApprove" class="btn-approve">✅ Esegui</button>
-    </div>
-  </div>
-
-  <!-- Input area -->
-  <div class="input-area">
-
-    <!-- Toolbar sopra textarea -->
-    <div class="input-toolbar">
-      <!-- Modalità -->
-      <div class="mode-toggle" title="Modalità esecuzione">
-        <button id="modeBtn" class="mode-btn mode-auto">⚡ Auto</button>
+      <label for="apiEndpoint">Indirizzo API</label
+      ><input
+        id="apiEndpoint"
+        type="url"
+        placeholder="https://api.example.com/v1"
+        autocomplete="off"
+        spellcheck="false"
+      />
+      <label for="apiKey"
+        >Chiave API <span class="muted">· facoltativa se il servizio non la richiede</span></label
+      >
+      <div class="tool-row">
+        <input id="apiKey" type="password" autocomplete="off" placeholder="La tua chiave" /><button
+          id="btnShowKey"
+          class="btn-secondary"
+        >
+          Mostra
+        </button>
       </div>
-      <!-- Immagine allegata -->
+      <label for="modelManual">Modello</label>
+      <div class="tool-row">
+        <input
+          id="modelManual"
+          type="text"
+          placeholder="Nome esatto del modello"
+          spellcheck="false"
+        /><button id="btnLoadModels" class="btn-secondary" title="Carica modelli">Carica</button>
+      </div>
+      <select id="modelSelect" class="hidden" aria-label="Modelli disponibili"></select>
+      <div id="modelLoadStatus" class="field-status" role="status"></div>
+      <details class="settings-details">
+        <summary>Compatibilità e autenticazione</summary>
+        <div class="settings-fields">
+          <label for="protocolSelect">Formato API</label
+          ><select id="protocolSelect">
+            <option value="auto">Automatico</option>
+            <option value="openai">OpenAI compatibile</option>
+            <option value="anthropic">Anthropic Messages</option>
+          </select>
+          <label for="modelsUrl">URL elenco modelli <span class="muted">· opzionale</span></label
+          ><input
+            id="modelsUrl"
+            type="url"
+            placeholder="Rilevato dall’indirizzo API"
+            spellcheck="false"
+          /><small
+            >Per i gateway PHP, la richiesta GET usa lo stesso endpoint. Puoi specificare un
+            percorso differente.</small
+          >
+          <label for="authSelect">Autenticazione</label
+          ><select id="authSelect">
+            <option value="auto">Automatica per il protocollo</option>
+            <option value="bearer">Bearer token</option>
+            <option value="header">Header personalizzato</option>
+            <option value="none">Nessuna</option>
+          </select>
+          <div id="authHeaderRow" hidden>
+            <label for="authHeader">Nome header</label
+            ><input id="authHeader" type="text" value="X-API-Key" />
+          </div>
+          <label for="visionSelect">Input immagini</label
+          ><select id="visionSelect">
+            <option value="auto">Rilevamento automatico</option>
+            <option value="on">Supportato da questo modello</option>
+            <option value="off">Solo testo</option>
+          </select>
+          <label class="tool-check"
+            ><input type="checkbox" id="nativeToolsCheck" /> Usa strumenti nativi se
+            supportati</label
+          ><small>Se il servizio rifiuta gli strumenti, l’agente prova il formato testuale.</small>
+        </div>
+      </details>
+      <details class="settings-details">
+        <summary>Memoria e limiti</summary>
+        <div class="settings-fields">
+          <label for="userMemory">Preferenze da ricordare</label
+          ><textarea
+            id="userMemory"
+            rows="3"
+            maxlength="3000"
+            placeholder="Es. rispondi in modo sintetico; usa prezzi in euro."
+          ></textarea
+          ><small>Non inserire password o informazioni riservate.</small
+          ><label for="maxSteps">Massimo passaggi per attività</label
+          ><input id="maxSteps" type="number" min="1" max="80" value="40" /><label for="tokenBudget"
+            >Limite token per attività</label
+          ><input id="tokenBudget" type="number" min="1000" step="1000" value="80000" /><small
+            >Usa il consumo comunicato dal provider; se assente, resta attivo il limite di
+            passaggi.</small
+          ><label for="timeoutSeconds">Tempo massimo risposta (secondi)</label
+          ><input id="timeoutSeconds" type="number" min="10" max="300" value="120" />
+        </div>
+      </details>
+      <div class="tool-row">
+        <button id="btnSaveOnly" class="btn-secondary">Salva</button
+        ><button id="btnSaveSettings" class="btn-primary">Salva e verifica</button>
+      </div>
+      <div id="testResult" class="field-status" role="status"></div>
+      <p class="privacy-note">
+        La chiave è salvata solo su questo dispositivo. La verifica invia un breve messaggio al
+        servizio scelto.
+      </p>
+    </div>
+    <div id="automationsPanel" class="panel-drawer auto-panel hidden">
+      <div class="drawer-header">
+        <span>🤖 Automazioni</span>
+        <button id="btnNewAuto" class="btn-secondary btn-sm">+ Nuova</button>
+      </div>
+
+      <!-- Lista automazioni salvate -->
+      <div id="autoList" class="auto-list"></div>
+
+      <!-- Form creazione / modifica -->
+      <div id="autoForm" class="auto-form hidden">
+        <div class="tool-section-title" id="autoFormTitle">Nuova Automazione</div>
+        <input type="hidden" id="autoId" />
+
+        <input
+          id="autoName"
+          type="text"
+          class="tool-input"
+          placeholder="Nome (es: Controlla prezzo TV)"
+        />
+        <textarea
+          id="autoTask"
+          class="tool-textarea"
+          placeholder="Task da eseguire..."
+          rows="3"
+        ></textarea>
+
+        <!-- Tipo schedule -->
+        <div class="auto-radio-group">
+          <label class="auto-radio"
+            ><input type="radio" name="schedType" value="interval" id="radioInterval" checked />
+            Ogni intervallo fisso</label
+          >
+          <label class="auto-radio"
+            ><input type="radio" name="schedType" value="daily" id="radioDaily" /> Orario
+            specifico</label
+          >
+        </div>
+
+        <!-- Sezione intervallo -->
+        <div id="schedInterval" class="auto-schedule-section">
+          <div class="tool-row">
+            <input
+              id="autoIntervalVal"
+              type="number"
+              min="1"
+              value="1"
+              class="tool-input"
+              style="flex: 1"
+              placeholder="1"
+            />
+            <select id="autoIntervalUnit" class="tool-input" style="flex: 2">
+              <option value="1">minuti</option>
+              <option value="60" selected>ore</option>
+              <option value="1440">giorni</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Sezione orario + giorni -->
+        <div id="schedDaily" class="auto-schedule-section hidden">
+          <input id="autoTime" type="time" class="tool-input" value="09:00" />
+          <div class="auto-days">
+            <label class="auto-day"
+              ><input type="checkbox" class="day-cb" value="1" checked /> Lun</label
+            >
+            <label class="auto-day"
+              ><input type="checkbox" class="day-cb" value="2" checked /> Mar</label
+            >
+            <label class="auto-day"
+              ><input type="checkbox" class="day-cb" value="3" checked /> Mer</label
+            >
+            <label class="auto-day"
+              ><input type="checkbox" class="day-cb" value="4" checked /> Gio</label
+            >
+            <label class="auto-day"
+              ><input type="checkbox" class="day-cb" value="5" checked /> Ven</label
+            >
+            <label class="auto-day"><input type="checkbox" class="day-cb" value="6" /> Sab</label>
+            <label class="auto-day"><input type="checkbox" class="day-cb" value="0" /> Dom</label>
+          </div>
+        </div>
+
+        <!-- Stop condition + max runs + modello -->
+        <input
+          id="autoStop"
+          type="text"
+          class="tool-input"
+          placeholder="Condizione di arresto da verificare (es: prezzo &lt; 200€)"
+        />
+        <div class="tool-row">
+          <input
+            id="autoMaxRuns"
+            type="number"
+            min="0"
+            value="0"
+            class="tool-input"
+            style="flex: 1"
+            placeholder="Max esec. (0=∞)"
+          />
+          <input
+            id="autoModel"
+            type="text"
+            class="tool-input"
+            style="flex: 2"
+            placeholder="Modello (es: gpt-4o-mini)"
+          />
+        </div>
+        <div class="tool-row">
+          <button id="btnAutoCancel" class="btn-secondary btn-sm" style="flex: 1">Annulla</button>
+          <button id="btnAutoSave" class="btn-primary btn-sm" style="flex: 2">
+            💾 Salva e attiva
+          </button>
+        </div>
+      </div>
+    </div>
+    <div id="templatesPanel" class="panel-drawer hidden">
+      <div class="drawer-header">
+        <span>⭐ Template Salvati</span>
+        <button id="btnAddTemplate" class="btn-secondary btn-sm">+ Salva prompt</button>
+      </div>
+      <input
+        type="text"
+        id="templateSearchInput"
+        class="search-input"
+        placeholder="🔍 Cerca template..."
+      />
+      <div id="templateList" class="template-list"></div>
+    </div>
+    <div id="toolsPanel" class="panel-drawer tools-panel hidden">
+      <div class="quick-tools">
+        <button id="btnSummary" class="btn-secondary">Riassumi pagina</button
+        ><button id="btnTranslate" class="btn-secondary">Traduci</button
+        ><button id="btnScreenshot" class="btn-secondary">Screenshot</button
+        ><button id="btnDownload" class="btn-secondary">Report chat</button>
+      </div>
+
+      <!-- Sezione 1: Scraper Prezzi + Loop -->
+      <div class="tool-section">
+        <div class="tool-section-title">💰 Scraper Prezzi</div>
+        <input
+          id="scraperUrl"
+          type="text"
+          class="tool-input"
+          placeholder="URL pagina o prodotto..."
+        />
+        <input
+          id="scraperTarget"
+          type="text"
+          class="tool-input"
+          placeholder="Cosa estrarre (es: prezzo, disponibilità)"
+        />
+        <label class="tool-check"
+          ><input type="checkbox" id="scraperLoop" /> 🔄 Loop — monitora fino a condizione</label
+        >
+        <input
+          id="scraperCondition"
+          type="text"
+          class="tool-input tool-input-hidden"
+          placeholder="Condizione di stop (es: prezzo &lt; 50€)"
+        />
+        <button id="btnScraperGenera" class="btn-primary btn-sm" style="width: 100%">
+          🔍 Genera task
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Sezione 2: Confronto Prodotti -->
+      <div class="tool-section">
+        <div class="tool-section-title">⚖️ Confronto Prodotti</div>
+        <input id="confrontoUrl1" type="text" class="tool-input" placeholder="URL prodotto 1" />
+        <input id="confrontoUrl2" type="text" class="tool-input" placeholder="URL prodotto 2" />
+        <input
+          id="confrontoUrl3"
+          type="text"
+          class="tool-input"
+          placeholder="URL prodotto 3 (opzionale)"
+        />
+        <button id="btnConfrontoGenera" class="btn-primary btn-sm" style="width: 100%">
+          ⚖️ Confronta
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Sezione 3: Form Filler -->
+      <div class="tool-section">
+        <div class="tool-section-title">📝 Form Filler</div>
+        <textarea
+          id="formFillerData"
+          class="tool-textarea"
+          placeholder="Dati per compilare form&#10;es:&#10;Nome: Mario Rossi&#10;Email: mario@esempio.it&#10;Telefono: 333 1234567"
+          rows="4"
+        ></textarea>
+        <div class="tool-row">
+          <button id="btnFormFillerSave" class="btn-secondary btn-sm">💾 Salva</button>
+          <button id="btnFormFillerGenera" class="btn-primary btn-sm" style="flex: 1">
+            📝 Compila form
+          </button>
+        </div>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Sezione 4: Ricerca Google -->
+      <div class="tool-section">
+        <div class="tool-section-title">🔍 Ricerca Google</div>
+        <input
+          id="googleQuery"
+          type="text"
+          class="tool-input"
+          placeholder="Cosa cercare su Google..."
+        />
+        <label class="tool-check"
+          ><input type="checkbox" id="googleLinksOnly" /> Solo estrai link (non aprire i
+          siti)</label
+        >
+        <button id="btnGoogleGenera" class="btn-primary btn-sm" style="width: 100%">
+          🔍 Cerca
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Sezione 5: Analisi SEO -->
+      <div class="tool-section">
+        <div class="tool-section-title">📈 Analisi SEO Completa</div>
+        <input
+          id="seoUrl"
+          type="text"
+          class="tool-input"
+          placeholder="URL del sito da analizzare..."
+        />
+        <div class="tool-checks-grid">
+          <label class="tool-check"
+            ><input type="checkbox" class="seo-cb" value="meta" checked /> Meta tag</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="seo-cb" value="headings" checked /> Struttura
+            H1-H6</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="seo-cb" value="links" checked /> Link
+            interni/esterni</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="seo-cb" value="images" checked /> Immagini senza
+            alt</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="seo-cb" value="robots" checked /> robots.txt /
+            sitemap</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="seo-cb" value="speed" checked /> Velocità
+            percepita</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="seo-cb" value="mobile" checked /> Mobile
+            friendliness</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="seo-cb" value="schema" /> Schema / dati
+            strutturati</label
+          >
+        </div>
+        <button id="btnSeoGenera" class="btn-primary btn-sm" style="width: 100%">
+          📈 Avvia analisi SEO
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Sezione 5b: Analisi Google Ads -->
+      <div class="tool-section">
+        <div class="tool-section-title">📣 Analisi Google Ads</div>
+        <select id="adsScope" class="tool-input">
+          <option value="full" selected>Analisi completa account</option>
+          <option value="campaigns">Solo campagne (budget, CTR, CPC)</option>
+          <option value="keywords">Solo parole chiave e termini di ricerca</option>
+          <option value="ads">Solo annunci (stato, rifiutati)</option>
+        </select>
+        <label class="tool-check"
+          ><input type="checkbox" id="adsFix" /> 🔧 Proponi e applica correzioni (chiede conferma
+          per ognuna)</label
+        >
+        <div style="font-size: 11px; color: #94a3b8; margin: 2px 0 6px">
+          Devi essere già loggato su ads.google.com in Chrome. Ogni modifica richiede la tua
+          approvazione.
+        </div>
+        <button id="btnAdsGenera" class="btn-primary btn-sm" style="width: 100%">
+          📣 Avvia analisi Ads
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Sezione 5c: Memoria Siti (apprendimento) -->
+      <div class="tool-section">
+        <div class="tool-section-title">📚 Memoria Siti (apprendimento)</div>
+        <div style="font-size: 11px; color: #94a3b8; margin-bottom: 6px">
+          Appunti che l'agente ha imparato sui siti (selettori funzionanti, trucchi, pattern URL).
+          Li riusa automaticamente a ogni visita.
+        </div>
+        <div id="siteKnowledgeList" class="template-list"></div>
+        <button id="btnClearKnowledge" class="btn-danger btn-sm" style="width: 100%">
+          🗑 Dimentica tutti i siti
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Sezione 6: Controllo Sicurezza -->
+      <div class="tool-section">
+        <div class="tool-section-title">🛡️ Controllo Sicurezza Sito</div>
+        <input
+          id="secUrl"
+          type="text"
+          class="tool-input"
+          placeholder="URL del sito da controllare..."
+        />
+        <div class="tool-checks-grid">
+          <label class="tool-check"
+            ><input type="checkbox" class="sec-cb" value="virustotal" checked /> VirusTotal</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="sec-cb" value="safebrowsing" checked /> Google Safe
+            Browsing</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="sec-cb" value="urlhaus" checked /> URLhaus /
+            abuse.ch</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="sec-cb" value="ssl" checked /> Certificato SSL</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="sec-cb" value="headers" checked /> Header
+            sicurezza</label
+          >
+          <label class="tool-check"
+            ><input type="checkbox" class="sec-cb" value="source" checked /> 🔬 Scansione codice
+            sorgente</label
+          >
+        </div>
+        <button id="btnSecGenera" class="btn-primary btn-sm" style="width: 100%">
+          🛡️ Avvia controllo sicurezza
+        </button>
+      </div>
+
+      <div class="tool-divider"></div>
+
+      <!-- Sezione 7: Verifica Sito Truffa -->
+      <div class="tool-section">
+        <div class="tool-section-title">🕵️ Verifica Sito Truffa</div>
+        <input
+          id="scamUrl"
+          type="text"
+          class="tool-input"
+          placeholder="URL del sito da verificare..."
+        />
+        <label class="tool-check"
+          ><input type="checkbox" id="scamDeep" checked /> Analisi approfondita (cerca recensioni
+          esterne)</label
+        >
+        <button id="btnScamGenera" class="btn-primary btn-sm" style="width: 100%">
+          🕵️ Verifica legittimità
+        </button>
+      </div>
+    </div>
+    <div id="tabsPanel" class="panel-drawer hidden">
+      <div class="drawer-header">
+        <span>Scheda target agente</span>
+        <button id="btnNewTab" class="btn-secondary btn-sm">+ Nuova</button>
+      </div>
+      <div id="tabsList" class="tabs-list"></div>
+    </div>
+    <div id="historyPanel" class="panel-drawer hidden">
+      <div class="drawer-header">
+        <span>Cronologia chat</span>
+        <button id="btnClearAllHistory" class="btn-danger btn-sm">🗑 Cancella tutto</button>
+      </div>
+      <input
+        type="text"
+        id="historySearch"
+        class="search-input"
+        placeholder="🔍 Cerca nella cronologia..."
+      />
+      <div id="historyList" class="history-list"></div>
+    </div>
+    <div id="targetBadge" class="target-badge hidden">
+      <span id="targetTabName">Scheda scelta</span
+      ><button id="btnClearTarget" class="btn-clear" title="Usa la scheda attiva">×</button>
+    </div>
+    <details id="planPanel" class="plan-panel" hidden>
+      <summary id="planSummary">Piano</summary>
+      <ol id="planList"></ol>
+    </details>
+    <main class="conversation">
+      <section id="welcome" class="welcome">
+        <div class="welcome-eyebrow">MENO PASSAGGI. PIÙ RISULTATI.</div>
+        <h1>Cosa facciamo<br /><span>oggi?</span></h1>
+        <p>Un’idea da sviluppare o un’attività da completare. Cominciamo da qui.</p>
+        <div class="starter-grid">
+          <button data-prompt="Aiutami a organizzare questa idea: ">
+            <span>✦</span><strong>Ragioniamo insieme</strong
+            ><small>Scrivi, crea, chiarisci</small></button
+          ><button
+            data-agent="1"
+            data-prompt="Analizza la pagina corrente: riassumi i punti principali e indica le fonti osservate."
+          >
+            <span>▤</span><strong>Esplora una pagina</strong
+            ><small>Leggi, confronta, approfondisci</small></button
+          ><button
+            data-agent="1"
+            data-prompt="Aiutami a svolgere questa attività nel browser, chiedendomi conferma prima dei comandi: "
+          >
+            <span>↗</span><strong>Passiamo all’azione</strong
+            ><small>Il browser, con il tuo controllo</small>
+          </button>
+        </div>
+      </section>
+      <div id="messages" class="messages" aria-live="polite" aria-label="Conversazione"></div>
+    </main>
+    <div id="approvalBar" class="approval-bar hidden">
+      <strong>Prima di procedere</strong>
+      <p id="approvalText"></p>
+      <details>
+        <summary>Esamina o modifica il comando</summary>
+        <textarea
+          id="approvalParams"
+          rows="4"
+          spellcheck="false"
+          aria-label="Parametri del comando in JSON"
+        ></textarea>
+      </details>
+      <div class="approval-btns">
+        <button id="btnSkip" class="btn-secondary">Salta</button
+        ><button id="btnApprove" class="btn-primary">Approva ed esegui</button>
+      </div>
+    </div>
+    <p id="questionText" class="question-banner" hidden></p>
+    <section class="composer">
+      <div class="composer-top">
+        <select id="modeSelect" aria-label="Modalità">
+          <option value="chat">Chat</option>
+          <option value="auto">Agente autonomo</option>
+          <option value="ask_first">Con approvazione</option></select
+        ><button id="btnClearChat" class="text-btn" title="Nuova conversazione">
+          + Nuova chat
+        </button>
+      </div>
+      <textarea
+        id="taskInput"
+        rows="3"
+        placeholder="Scrivi a Diggio…"
+        aria-label="Messaggio"
+      ></textarea>
       <div id="attachedImagePreview" class="attached-preview hidden">
-        <img id="attachedThumb" src="" alt="immagine allegata">
-        <span id="visionWarning" class="vision-warning hidden" title="Questo modello non supporta immagini — usa Diggio Web/Balanced/Fast o LLaVA">⚠️ no vision</span>
-        <button id="btnRemoveImage" class="btn-clear" title="Rimuovi immagine">✕</button>
+        <img id="attachedThumb" alt="Immagine allegata" /><span
+          id="visionWarning"
+          class="vision-warning hidden"
+          >Il modello riceverà solo testo</span
+        ><button id="btnRemoveImage" class="btn-clear" title="Rimuovi allegato">×</button>
       </div>
-      <!-- Azioni destra -->
-      <div class="toolbar-right">
-        <button id="btnTools"     class="icon-btn" title="Strumenti: scraper, confronto, form, Google">🛠️</button>
-        <button id="btnSummary"   class="icon-btn" title="Riassumi pagina corrente">📖</button>
-        <button id="btnTranslate" class="icon-btn" title="Traduci e analizza pagina">🌐</button>
-        <button id="btnExportCSV" class="icon-btn" title="Esporta dati (CSV / JSON)">📊</button>
-        <button id="btnAttach"     class="icon-btn" title="Allega immagine">🖼️</button>
-        <button id="btnScreenshot" class="icon-btn" title="Screenshot pagina">📸</button>
-        <button id="btnDownload"   class="icon-btn" title="Scarica report HTML">📄</button>
-        <button id="btnClearChat"  class="icon-btn" title="Nuova conversazione (pulisce chat e memoria dell'agente)">🗑️</button>
+      <div class="composer-bottom">
+        <div class="composer-actions">
+          <button id="btnAttach" class="icon-btn" title="Allega immagine">＋</button
+          ><button id="btnTabs" class="icon-btn" title="Scegli scheda" data-drawer="tabsPanel">
+            ▣</button
+          ><button
+            id="btnTemplates"
+            class="icon-btn"
+            title="Prompt salvati"
+            data-drawer="templatesPanel"
+          >
+            ☆</button
+          ><button id="btnExportCSV" class="icon-btn" title="Esporta conversazione">↥</button>
+        </div>
+        <div class="send-actions">
+          <button id="btnStop" class="btn-secondary" disabled>Stop</button
+          ><button id="btnStart" class="btn-primary">
+            Invia <span aria-hidden="true">↑</span>
+          </button>
+        </div>
       </div>
-    </div>
-
-    <textarea
-      id="taskInput"
-      placeholder="Descrivi cosa vuoi fare..."
-      rows="3"
-    ></textarea>
-
-    <div class="btn-row">
-      <button id="btnStop"  class="btn-secondary" disabled>⏹ Stop</button>
-      <button id="btnStart" class="btn-primary">▶ Avvia</button>
-    </div>
-  </div>
-
-  <!-- Input file nascosto per allegati -->
-  <input type="file" id="fileInput" accept="image/*" style="display:none">
-
-  <!-- Footer -->
-  <footer class="plugin-footer">
-    <span class="footer-brand">Diggio Agent IA</span>
-    <span class="footer-sep">·</span>
-    <span class="footer-author">Antonio Di Giorgio</span>
-    <span class="footer-sep">·</span>
-    <a href="https://www.diggio3000.it" target="_blank" rel="noopener" class="footer-author" style="text-decoration:none">www.diggio3000.it</a>
-    <span class="footer-sep">·</span>
-    <span id="footerVersion" class="footer-version">v1.0.0</span>
-  </footer>
-
-  <script src="panel.js"></script>
-</body>
+      <div id="exportOptions" class="export-options" hidden>
+        <button data-export="html">Report HTML</button><button data-export="csv">CSV</button
+        ><button data-export="json">JSON</button>
+      </div>
+    </section>
+    <footer class="plugin-footer">
+      <span id="statusText">Pronto</span><span id="footerVersion"></span
+      ><button id="btnGuide" class="text-btn" title="Guida">Guida</button>
+    </footer>
+    <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" hidden />
+    <script type="module" src="panel.js"></script>
+  </body>
 </html>
