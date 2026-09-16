@@ -509,12 +509,105 @@ th {
 .plugin-footer {
   flex-shrink: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 3px;
   padding: 8px 20px 11px;
   font-size: 10px;
   color: var(--muted);
+}
+.footer-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+}
+.footer-status #statusText {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.footer-author {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2px 8px;
+  text-align: center;
+}
+.footer-author a,
+#usagePanel a {
+  color: var(--primary);
+  text-decoration: none;
+}
+.footer-author a:hover,
+#usagePanel a:hover {
+  text-decoration: underline;
+}
+#btnUsage {
+  flex-shrink: 0;
+}
+.setup-notice {
+  flex-shrink: 0;
+  margin: 4px 14px 8px;
+  padding: 12px;
+  border: 1px solid var(--primary);
+  border-radius: 10px;
+  background: var(--tint);
+  font-size: 12px;
+}
+.setup-notice p {
+  margin: 5px 0 10px;
+  color: var(--muted);
+}
+.setup-notice .btn-primary {
+  padding: 7px 12px;
+}
+.usage-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 16px 0;
+}
+.usage-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  background: var(--elevated);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.usage-card small {
+  color: var(--muted);
+}
+.usage-card strong {
+  font-size: 15px;
+}
+.usage-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.usage-row > * {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.usage-row strong {
+  text-align: right;
+}
+.usage-alert {
+  color: var(--error);
+}
+#usagePanel p {
+  margin: 10px 0;
+}
+#usagePanel h3 {
+  margin: 22px 0 8px;
 }
 #footerVersion {
   margin-left: auto;
@@ -614,7 +707,7 @@ th {
 }
 .panel-drawer {
   position: absolute;
-  inset: 115px 10px 40px;
+  inset: 115px 10px 72px;
   z-index: 20;
   background: var(--surface);
   box-shadow: var(--shadow);

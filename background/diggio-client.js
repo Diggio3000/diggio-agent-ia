@@ -6,6 +6,7 @@ import {
   requestJson
 } from '../shared/providers.js';
 import { extractJson } from '../shared/safety.js';
+import { normalizeUsage, readLimits } from '../shared/usage.js';
 
 function fnDef(name, description, properties = {}, required = []) {
   return {
@@ -234,6 +235,20 @@ export class DiggioClient {
     this.nativeTools = opts.nativeTools === true;
     this.toolsFailed = false;
     this.usage = 0;
+    this.onUsage = opts.onUsage;
+  }
+  async receiveUsage({ json, headers, status }) {
+    const usage = normalizeUsage(json, new URL(this.baseUrl).origin === 'https://openrouter.ai');
+    this.usage += usage.total || 0;
+    await this.onUsage?.(
+      {
+        usage,
+        rates: readLimits(headers),
+        status,
+        failed: !json || !!json.error || json.status === 'error'
+      },
+      this.usage
+    );
   }
   get useNativeTools() {
     return this.nativeTools && !this.toolsFailed && protocolFor(this.config) !== 'anthropic';
@@ -329,6 +344,7 @@ export class DiggioClient {
         { method: 'POST', headers: headersFor(this.config), body: JSON.stringify(body) },
         {
           signal,
+          onResponse: (response) => this.receiveUsage(response),
           timeout: Math.min(
             300000,
             Math.max(10000, Number(this.config.timeoutSeconds || 120) * 1000)
@@ -346,9 +362,6 @@ export class DiggioClient {
       }
       throw e;
     }
-    this.usage +=
-      json.usage?.total_tokens ??
-      (json.usage?.input_tokens || 0) + (json.usage?.output_tokens || 0);
     const m = json.choices?.[0]?.message;
     if (m?.tool_calls?.length) {
       if (m.tool_calls.length !== 1) throw new Error('Emetti una sola azione per risposta.');
@@ -402,11 +415,12 @@ export class DiggioClient {
     const json = await requestJson(
       this.baseUrl,
       { method: 'POST', headers: headersFor(this.config), body: JSON.stringify(body) },
-      { signal, timeout: Number(this.config.timeoutSeconds || 120) * 1000 }
+      {
+        signal,
+        timeout: Number(this.config.timeoutSeconds || 120) * 1000,
+        onResponse: (response) => this.receiveUsage(response)
+      }
     );
-    this.usage +=
-      json.usage?.total_tokens ??
-      (json.usage?.input_tokens || 0) + (json.usage?.output_tokens || 0);
     const answer = anthropic
       ? (json.content || [])
           .filter((p) => p.type === 'text')

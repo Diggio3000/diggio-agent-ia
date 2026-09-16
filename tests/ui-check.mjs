@@ -51,11 +51,12 @@ const server = http.createServer(async (req, res) => {
       m.role === 'assistant' && typeof m.content === 'string' && m.content.startsWith('ACTION:')
   ).length;
   if (body.model === 'agent-test')
-    content = actions === 0
-      ? 'THOUGHT: preparo il piano\nACTION: plan\nPARAMS: {"steps":["Osservare gli elementi","Verificare il risultato"],"current":1}'
-      : actions === 1
-        ? 'THOUGHT: osservo gli elementi\nACTION: mark_page\nPARAMS: {}'
-        : 'THOUGHT: verifica finita\nACTION: done\nPARAMS: {"message":"Pagina verificata senza estrarre password."}';
+    content =
+      actions === 0
+        ? 'THOUGHT: preparo il piano\nACTION: plan\nPARAMS: {"steps":["Osservare gli elementi","Verificare il risultato"],"current":1}'
+        : actions === 1
+          ? 'THOUGHT: osservo gli elementi\nACTION: mark_page\nPARAMS: {}'
+          : 'THOUGHT: verifica finita\nACTION: done\nPARAMS: {"message":"Pagina verificata senza estrarre password."}';
   if (body.model === 'missing-test')
     content =
       actions || body.messages.some((m) => String(m.content).includes('Campo assente'))
@@ -73,7 +74,15 @@ const server = http.createServer(async (req, res) => {
     await new Promise((r) => setTimeout(r, 1800));
     content = 'THOUGHT: prossimo click\nACTION: click\nPARAMS: {"selector":"#safe"}';
   }
-  res.end(JSON.stringify({ choices: [{ message: { content } }], usage: { total_tokens: 120 } }));
+  res.setHeader('x-ratelimit-limit-requests', '100');
+  res.setHeader('x-ratelimit-remaining-requests', '99');
+  res.setHeader('x-ratelimit-reset-requests', '1m');
+  res.end(
+    JSON.stringify({
+      choices: [{ message: { content } }],
+      usage: { total_tokens: 120, prompt_tokens: 80, completion_tokens: 40 }
+    })
+  );
 });
 await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
 const base = 'http://127.0.0.1:' + server.address().port;
@@ -92,8 +101,12 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`chrome-extension://${extensionId}/sidepanel/panel.html`);
   await page.waitForFunction(
-    () => document.querySelector('#footerVersion').textContent === 'v2.0.0'
+    () => document.querySelector('#footerVersion').textContent === 'v2.1.0'
   );
+  assert.equal(await page.locator('#setupNotice').isVisible(), true);
+  await page.click('#btnSetupProvider');
+  assert.equal(await page.locator('#settingsPanel').isVisible(), true);
+  await page.locator('#settingsPanel .drawer-close').click();
   for (const [width, height] of [
     [320, 640],
     [390, 844],
@@ -106,6 +119,10 @@ try {
       `overflow ${width}`
     );
     assert.equal(await page.locator('#btnStart').isVisible(), true);
+    const author = page.locator('.footer-author a');
+    assert.equal(await author.getAttribute('href'), 'https://www.diggio3000.it');
+    const box = await author.boundingBox();
+    assert.ok(box.y + box.height <= height, 'Firma sempre visibile');
   }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ animations: 'disabled', path: path.join(output, 'home-light.png') });
@@ -126,6 +143,7 @@ try {
   await page.waitForFunction(() =>
     document.querySelector('#testResult').textContent.includes('Connessione riuscita')
   );
+  assert.equal(await page.locator('#setupNotice').isVisible(), false);
   await page.screenshot({ animations: 'disabled', path: path.join(output, 'custom-settings.png') });
   await page.locator('#settingsPanel .drawer-close').click();
   await page.fill('#taskInput', 'Primo messaggio di prova');
@@ -144,6 +162,18 @@ try {
       document.querySelectorAll('.message.done').length === 2
   );
   assert.ok(requests.at(-1).messages.some((m) => m.content === 'Primo messaggio di prova'));
+  await page.click('#btnUsage');
+  await page.waitForFunction(() =>
+    document.querySelector('#usageLocal').textContent.includes('360')
+  );
+  assert.match(await page.locator('#usageLocal').textContent(), /240/);
+  assert.match(await page.locator('#usageLimits').textContent(), /99 \/ 100/);
+  assert.equal(await page.locator('#btnRefreshQuota').isVisible(), false);
+  await page.screenshot({ animations: 'disabled', path: path.join(output, 'usage-light.png') });
+  await page.click('#btnTheme');
+  await page.screenshot({ animations: 'disabled', path: path.join(output, 'usage-dark.png') });
+  await page.click('#btnTheme');
+  await page.locator('#usagePanel .drawer-close').click();
   await page.click('#btnClearChat');
   await page.click('#btnHistory');
   assert.ok(await page.locator('.history-open').count());
@@ -291,9 +321,75 @@ try {
       .filter((r) => r.model === 'condition-test')
       .some((r) => JSON.stringify(r).includes('minore di 20 euro'))
   );
+  // Quota reale del connettore, risposta simulata: nessuna credenziale o chiamata a pagamento.
+  await page.route('https://openrouter.ai/api/v1/key', (route) =>
+    route.fulfill({
+      json: {
+        data: { limit: 10, limit_remaining: 4, usage: 6, usage_monthly: 2, limit_reset: 'monthly' }
+      }
+    })
+  );
+  await page.evaluate(() =>
+    chrome.storage.local.set({
+      provider: 'openrouter',
+      apiEndpoint: 'https://openrouter.ai/api/v1/chat/completions',
+      apiKey: 'chiave-simulata',
+      model: 'model-test'
+    })
+  );
+  await page.click('#btnUsage');
+  await page.waitForFunction(() =>
+    [...document.querySelector('#usageConnection').options].some((o) =>
+      o.text.includes('OpenRouter')
+    )
+  );
+  const activeQuotaId = await page.evaluate(
+    () =>
+      [...document.querySelector('#usageConnection').options].find((o) =>
+        o.text.includes('OpenRouter')
+      ).value
+  );
+  await page.selectOption('#usageConnection', activeQuotaId);
+  await page.click('#btnRefreshQuota');
+  await page.waitForFunction(() =>
+    document.querySelector('#usageAccount').textContent.includes('Residuo del limite chiave')
+  );
+  assert.match(await page.locator('#usageAccount').textContent(), /non è il saldo/);
+  await page.selectOption('#usagePeriod', '1');
+  assert.match(await page.locator('#usageLocal').textContent(), /Non disponibile/);
+  await page.evaluate(() =>
+    chrome.storage.local.set({
+      provider: 'ollama',
+      apiEndpoint: 'http://localhost:11434/v1/chat/completions',
+      apiKey: '',
+      model: 'example-cloud'
+    })
+  );
+  await page.waitForFunction(() =>
+    [...document.querySelector('#usageConnection').options].some((o) =>
+      o.text.includes('example-cloud')
+    )
+  );
+  const cloudId = await page.evaluate(
+    () =>
+      [...document.querySelector('#usageConnection').options].find((o) =>
+        o.text.includes('example-cloud')
+      ).value
+  );
+  await page.selectOption('#usageConnection', cloudId);
+  assert.equal(await page.locator('#btnRefreshQuota').isVisible(), false);
+  assert.equal(
+    await page.locator('#usageDashboard').getAttribute('href'),
+    'https://ollama.com/settings/usage'
+  );
+  assert.match(await page.locator('#usageAccount').textContent(), /residuo, piano e rinnovo/);
+  await page.setViewportSize({ width: 320, height: 640 });
+  assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+  await page.reload();
+  await page.waitForFunction(() => document.querySelector('#setupNotice').hidden);
   assert.deepEqual(errors, []);
   console.log(
-    'OK: layout, temi, endpoint PHP generico, modelli, chat e memoria, cronologia, export, password, popup, focus, approvazione dopo riapertura, Stop, retry periodico e condizione di arresto automazioni.'
+    'OK: avviso iniziale, firma, consumi e limiti, quota OpenRouter simulata, Ollama cloud, layout, temi, endpoint PHP generico, modelli, chat e memoria, cronologia, export, password, popup, focus, approvazione dopo riapertura, Stop, retry periodico e condizione di arresto automazioni.'
   );
   console.log('Screenshot:', output);
 } finally {

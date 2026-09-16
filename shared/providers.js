@@ -119,7 +119,11 @@ export function anthropicMessages(messages) {
     }));
 }
 
-export async function requestJson(url, options = {}, { signal, timeout = 120000 } = {}) {
+export async function requestJson(
+  url,
+  options = {},
+  { signal, timeout = 120000, onResponse } = {}
+) {
   const controller = new AbortController();
   const cancel = () => controller.abort(signal?.reason);
   if (signal?.aborted) cancel();
@@ -128,20 +132,22 @@ export async function requestJson(url, options = {}, { signal, timeout = 120000 
     () => controller.abort(new DOMException('Tempo di risposta superato', 'TimeoutError')),
     timeout
   );
+  let response, json;
   try {
-    const response = await fetch(url, { ...options, signal: controller.signal });
+    response = await fetch(url, { ...options, signal: controller.signal });
     const text = await response.text();
-    let json;
     try {
       json = JSON.parse(text);
     } catch {
-      throw new Error(
+      const error = new Error(
         `Risposta non JSON (HTTP ${response.status}). Verifica l’indirizzo dell’API.`
       );
+      error.status = response.status;
+      throw error;
     }
-    if (!response.ok || json.error || json.status === 'error') {
+    if (!response.ok || !json || json.error || json.status === 'error') {
       const error = new Error(
-        json.error?.message || json.message || `Errore HTTP ${response.status}`
+        json?.error?.message || json?.message || `Errore HTTP ${response.status}`
       );
       error.status = response.status;
       throw error;
@@ -150,6 +156,13 @@ export async function requestJson(url, options = {}, { signal, timeout = 120000 
   } finally {
     clearTimeout(timer);
     signal?.removeEventListener('abort', cancel);
+    if (response && onResponse) {
+      try {
+        await onResponse({ json, headers: response.headers, status: response.status });
+      } catch {
+        console.warn('Impossibile aggiornare il registro consumi.');
+      }
+    }
   }
 }
 

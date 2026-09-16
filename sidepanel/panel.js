@@ -10,6 +10,7 @@ import {
 } from '../shared/providers.js';
 import { DiggioClient } from '../background/diggio-client.js';
 import { esc, renderText, csvCell } from '../shared/render.js';
+import { initializeUsagePanel } from './usage-panel.js';
 
 const $ = (id) => document.getElementById(id);
 let agentRunning = false,
@@ -23,6 +24,7 @@ let currentMode = 'chat',
   currentProvider = 'openai',
   settings = {};
 const DRAWERS = [
+  'usagePanel',
   'settingsPanel',
   'tabsPanel',
   'historyPanel',
@@ -151,7 +153,7 @@ function applyState(next) {
   $('progressText').textContent =
     next.running && next.step
       ? `${next.step}/${next.maxSteps} passi`
-      : next.tokens
+      : next.tokens !== undefined && next.tokens !== null
         ? `${next.tokens.toLocaleString('it-IT')} token`
         : '';
   $('btnStart').textContent = awaitingReply
@@ -176,6 +178,11 @@ function applyState(next) {
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
+  if (msg.type === 'USAGE_UPDATE') {
+    activeState.tokens = msg.tokens;
+    $('progressText').textContent =
+      msg.tokens === null ? 'Token non disponibili' : `${msg.tokens.toLocaleString('it-IT')} token`;
+  }
   if (msg.type === 'AGENT_STATE') applyState(msg.state);
   if (msg.type === 'AGENT_UPDATE') {
     if (msg.updateType === 'screenshot') {
@@ -260,6 +267,17 @@ $('modeSelect').addEventListener('change', () => {
     currentMode === 'chat' ? 'Scrivi a Diggio…' : 'Descrivi cosa vuoi fare nel browser…';
 });
 $('btnSettings').addEventListener('click', () => toggleDrawer('settingsPanel'));
+$('btnSetupProvider').addEventListener('click', () => {
+  if ($('settingsPanel').classList.contains('hidden')) toggleDrawer('settingsPanel');
+});
+function updateSetupNotice() {
+  $('setupNotice').hidden = !!(settings.apiEndpoint && settings.model);
+}
+const refreshUsage = initializeUsagePanel();
+$('btnUsage').addEventListener('click', () => {
+  toggleDrawer('usagePanel');
+  refreshUsage().catch(showError);
+});
 $('btnGuide').addEventListener('click', () => toggleDrawer('guidePanel'));
 $('btnTheme').addEventListener('click', () => {
   const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
@@ -381,11 +399,15 @@ async function saveSettings(test) {
     userMemory: $('userMemory').value.slice(0, 3000)
   });
   settings = c;
+  updateSetupNotice();
   $('connectionLabel').textContent = c.model;
   $('testResult').textContent = 'Configurazione salvata sul dispositivo.';
   if (test) {
     $('testResult').textContent = 'Verifica connessione…';
-    const client = new DiggioClient(c.apiKey, c.model, c.apiEndpoint, c);
+    const client = new DiggioClient(c.apiKey, c.model, c.apiEndpoint, {
+      ...c,
+      onUsage: (report) => rpc({ type: 'RECORD_USAGE', config: c, report })
+    });
     const reply = await client.chat([{ role: 'user', content: 'Rispondi solo OK.' }]);
     $('testResult').textContent = 'Connessione riuscita · ' + reply.slice(0, 70);
   }
@@ -605,6 +627,7 @@ document.addEventListener('keydown', (e) => {
 });
 async function initialize() {
   settings = await loadSettings();
+  updateSetupNotice();
   profiles = settings.providerConfigs || {};
   currentProvider = settings.provider || 'openai';
   $('providerSelect').value = currentProvider;

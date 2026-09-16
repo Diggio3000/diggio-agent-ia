@@ -5,6 +5,7 @@ import { loadSettings, chatEndpoint } from '../shared/providers.js';
 import { needsApproval, browserUrl, abortableSleep, redact } from '../shared/safety.js';
 import { validateAutomation, scheduleSpec, calcNextRun } from '../shared/scheduler.js';
 import { DEFAULT_ENDPOINT, DEFAULT_MODEL } from './edition.js';
+import { recordUsage } from './usage-store.js';
 
 let state = { running: false, messages: [], conversationId: null, mode: 'chat', pending: null };
 let history = [],
@@ -89,6 +90,9 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   (async () => {
     await ready;
     switch (msg.type) {
+      case 'RECORD_USAGE':
+        await recordUsage(msg.config, msg.report);
+        return { ok: true };
       case 'GET_STATE':
         return { state: { ...state, running: state.running || sessionBusy } };
       case 'START_AGENT': {
@@ -215,6 +219,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
 
 function pickConfig(c) {
   const keys = [
+    'provider',
     'apiKey',
     'apiEndpoint',
     'model',
@@ -280,11 +285,21 @@ async function runSession(msg, automation = null) {
     cfg.model = cfg.model || DEFAULT_MODEL;
     state.mode = msg.mode || 'chat';
     state.step = 0;
-    state.tokens = 0;
+    state.tokens = null;
+    state.usageReported = false;
     state.plan = null;
     state.autoId = automation?.id || null;
     state.conversationId ||= String(Date.now());
-    const client = new DiggioClient(cfg.apiKey || '', cfg.model, cfg.apiEndpoint, cfg);
+    const client = new DiggioClient(cfg.apiKey || '', cfg.model, cfg.apiEndpoint, {
+      ...cfg,
+      onUsage: async (report, tokens) => {
+        state.usageReported ||= report.usage.total !== null;
+        state.tokens = state.usageReported ? tokens : null;
+        await persist();
+        await send({ type: 'USAGE_UPDATE', tokens: state.tokens });
+        await recordUsage(cfg, report);
+      }
+    });
     const content = msg.imageData
       ? [
           { type: 'text', text: msg.task },
@@ -436,7 +451,6 @@ async function runSession(msg, automation = null) {
           'Limite passaggi raggiunto: attività incompleta. Puoi continuare nella stessa chat.'
         );
     }
-    state.tokens = client.usage;
   } catch (e) {
     failed = true;
     await update(

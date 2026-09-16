@@ -36,8 +36,49 @@
     <div class="connection-strip">
       <span id="statusDot" class="status-dot"></span
       ><span id="connectionLabel">Configura il tuo modello</span><span id="progressText"></span>
+      <button id="btnUsage" class="text-btn" data-drawer="usagePanel">Consumi</button>
     </div>
     <div id="appNotice" class="notice" role="alert" hidden></div>
+    <section id="setupNotice" class="setup-notice" aria-label="Prima configurazione">
+      <strong>Configura un provider e un modello per iniziare</strong>
+      <p>
+        Scegli un servizio oppure il tuo endpoint custom. Aggiungi la chiave API, se richiesta, e
+        salva.
+      </p>
+      <button id="btnSetupProvider" class="btn-primary">Configura il modello</button>
+    </section>
+    <div id="usagePanel" class="panel-drawer hidden">
+      <div class="drawer-header">Consumi e limiti</div>
+      <p>
+        Misure ricevute durante chat, attività e verifiche di connessione su questo dispositivo.
+      </p>
+      <label for="usageConnection">Connessione e modello</label>
+      <select id="usageConnection"></select>
+      <label for="usagePeriod">Periodo del registro locale</label>
+      <select id="usagePeriod">
+        <option value="1">Oggi (UTC)</option>
+        <option value="7">Ultimi 7 giorni (UTC)</option>
+        <option value="30" selected>Ultimi 30 giorni (UTC)</option>
+      </select>
+      <div id="usageLocal" aria-live="polite"></div>
+      <h3>Limiti API comunicati dal servizio</h3>
+      <div id="usageLimits"></div>
+      <h3>Quota della chiave e account</h3>
+      <div id="usageAccount"></div>
+      <button id="btnRefreshQuota" class="btn-secondary" hidden>Aggiorna quota della chiave</button>
+      <p>
+        <a id="usageDashboard" target="_blank" rel="noopener noreferrer" hidden
+          >Apri la dashboard ufficiale</a
+        >
+      </p>
+      <p id="usageBudget" class="privacy-note"></p>
+      <p class="privacy-note">
+        Il registro conserva fino a 30 giorni e 200 combinazioni di connessione e modello, senza
+        messaggi né chiavi API. I dati mancanti non equivalgono a zero. Chiamate interrotte o prive
+        di risposta possono consumare risorse senza comparire qui. Il totale dell’account può
+        includere altri dispositivi e applicazioni.
+      </p>
+    </div>
     <div id="guidePanel" class="panel-drawer hidden">
       <div class="drawer-header">Come usare Diggio</div>
       <h2>Una chat, tre modi di lavorare.</h2>
@@ -700,8 +741,16 @@
       </div>
     </section>
     <footer class="plugin-footer">
-      <span id="statusText">Pronto</span><span id="footerVersion"></span
-      ><button id="btnGuide" class="text-btn" title="Guida">Guida</button>
+      <div class="footer-status">
+        <span id="statusText">Pronto</span><span id="footerVersion"></span
+        ><button id="btnGuide" class="text-btn" title="Guida">Guida</button>
+      </div>
+      <div class="footer-author">
+        <span>Antonio Di Giorgio · <strong>Diggio3000</strong></span>
+        <a href="https://www.diggio3000.it" target="_blank" rel="noopener noreferrer"
+          >www.diggio3000.it</a
+        >
+      </div>
     </footer>
     <input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" hidden />
     <script type="module" src="panel.js"></script>
