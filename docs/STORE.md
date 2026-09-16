@@ -1,4 +1,4 @@
-# Chrome Web Store — Diggio Agent IA 2.2.0
+# Chrome Web Store — Diggio Agent IA 2.2.1
 
 ## Descrizione breve
 

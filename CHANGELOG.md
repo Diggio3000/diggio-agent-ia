@@ -1,5 +1,10 @@
 # Modifiche
 
+## 2.2.1 — 16 settembre 2026
+
+- Icona D-128 fornita dall’autore applicata all’estensione, al pannello e alle grafiche pubbliche.
+
+
 ## 2.2.0 — 16 settembre 2026
 
 - Procedure Insegnami da chat e registrazione clic, bozze approvate, revisioni e riutilizzo.

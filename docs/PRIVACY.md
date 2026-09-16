@@ -1,6 +1,6 @@
 # Privacy — Diggio Agent IA
 
-Aggiornamento: 16 settembre 2026 · versione 2.2.0
+Aggiornamento: 16 settembre 2026 · versione 2.2.1
 
 ## Sviluppatore e scopo
 
