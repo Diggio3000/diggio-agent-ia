@@ -45,10 +45,14 @@ Scopo unico: assistente AI per l’utente nel browser. Richiede un endpoint AI c
 
 Permessi e trattamento sono descritti in [Privacy](PRIVACY.md). Il nuovo permesso scripting esegue funzioni incluse nel pacchetto per verificare elementi e focus e registrare dimostrazioni avviate dall’utente. debugger controlla solo le schede delle attività. Gli host generici servono ai siti scelti dall’utente e agli endpoint custom.
 
-Il comando JavaScript esistente esegue nella pagina codice proposto dal modello dopo approvazione esplicita. Dichiarare questo comportamento al revisore: non è garantita l’accettazione da parte dello Store. Il pacchetto non scarica dipendenze runtime.
+Il comando JavaScript esistente esegue nella pagina codice proposto dal modello dopo approvazione esplicita. Dichiarato come codice remoto al revisore, con riferimento alla deroga Debugger API nella sezione 2 delle Additional Requirements for Manifest V3: https://developer.chrome.com/docs/webstore/program-policies/mv3-requirements. Non è garantita l’accettazione da parte dello Store. Il pacchetto non scarica dipendenze runtime.
 
 ## Dichiarazioni sui dati
 
 Il modulo privacy dello Store deve riflettere i contenuti effettivamente trattati: autenticazione (chiavi API), attività/interazioni nelle pagine e contenuti dei siti, comunicazioni e qualsiasi categoria personale presente nei materiali che l’utente chiede di analizzare. Non dichiarare “nessun dato trattato” soltanto perché il trasferimento va direttamente al provider. Non selezionare usi pubblicitari o vendita dei dati: il codice non li implementa. Controllare le definizioni esatte del modulo prima dell’invio.
 
 La pubblicazione del codice e il caricamento dello ZIP non equivalgono all’approvazione della nuova versione nello Store. Registrare separatamente caricamento, invio in revisione e disponibilità pubblica.
+
+Categorie dichiarate nella dashboard: identificazione personale, dati finanziari e di pagamento, autenticazione, comunicazioni personali, cronologia web delle attività, attività utente e contenuti dei siti. Non sono dichiarate raccolte dedicate di dati sanitari o posizione.
+
+Icone scelte dall’autore: D rossa nel plugin e nel pannello; logo Diggio con pianeta per l’icona del negozio.
