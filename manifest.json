@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Diggio Agent IA",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "description": "Chat AI e agente browser con il tuo modello: procedure riutilizzabili, consumi e comandi autonomi o da approvare.",
   "permissions": [
     "debugger",

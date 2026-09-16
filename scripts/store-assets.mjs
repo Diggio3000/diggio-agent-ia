@@ -22,7 +22,7 @@ const shot=async(page)=>'data:image/png;base64,'+(await page.screenshot({animati
 try{
  context=await chromium.launchPersistentContext(path.join(temp,'profile'),{channel:'chromium',headless:true,args:[`--disable-extensions-except=${extension}`,`--load-extension=${extension}`],viewport:{width:430,height:880}});
  const sw=context.serviceWorkers()[0]||await context.waitForEvent('serviceworker'); const id=sw.url().split('/')[2];
- const page=await context.newPage();await page.goto(`chrome-extension://${id}/sidepanel/panel.html`); await page.waitForFunction(()=>document.querySelector('#footerVersion').textContent==='v2.2.1');
+ const page=await context.newPage();await page.goto(`chrome-extension://${id}/sidepanel/panel.html`); await page.waitForFunction(()=>document.querySelector('#footerVersion').textContent==='v2.2.2');
  const light=await shot(page);await page.click('#btnTheme');const dark=await shot(page);await page.click('#btnTheme');
  await page.evaluate(endpoint=>chrome.storage.local.set({provider:'custom',apiEndpoint:endpoint,model:'modello-demo',apiKey:'',vision:'off'}),`http://127.0.0.1:${server.address().port}/v1/chat/completions`);
  await page.reload(); await page.fill('#taskInput','Aiutami a organizzare la prima settimana del mio negozio online.');await page.click('#btnStart');

@@ -16,6 +16,11 @@ fs.mkdirSync(output, { recursive: true });
 const requests = [];
 let slowStarted = false;
 const server = http.createServer(async (req, res) => {
+  if (req.url === '/detail') {
+    res.setHeader('Content-Type', 'text/html;charset=utf-8');
+    res.end('<!doctype html><title>Fonte di dettaglio</title><h1>Risultato nella nuova scheda: indirizzo verificabile</h1>');
+    return;
+  }
   if (req.url === '/page') {
     res.setHeader('Content-Type', 'text/html;charset=utf-8');
     res.end(
@@ -50,6 +55,23 @@ const server = http.createServer(async (req, res) => {
     (m) =>
       m.role === 'assistant' && typeof m.content === 'string' && m.content.startsWith('ACTION:')
   ).length;
+  if (body.model === 'tabs-test') {
+    const observation = body.messages.find((m) => typeof m.content === 'string' && m.content.includes('Schede aperte:'))?.content;
+    const tab = observation?.match(/"tabId":(\d+)/)?.[1];
+    content = actions === 0
+      ? 'ACTION: open_tabs\nPARAMS: ' + JSON.stringify({ urls: [base + '/detail'] })
+      : actions === 1
+        ? 'ACTION: switch_tab\nPARAMS: ' + JSON.stringify({ tabId: Number(tab) })
+        : actions === 2
+          ? 'ACTION: read_page\nPARAMS: {}'
+          : 'ACTION: done\nPARAMS: {"message":"Fonte di dettaglio verificata."}';
+  }
+  if (body.model === 'repair-test') {
+    content = body.messages.some((m) => String(m.content).includes('RISPOSTA DA CORREGGERE'))
+      ? 'ACTION: done\nPARAMS: {"message":"Report recuperato, senza altre azioni."}'
+      : 'Ho letto la pagina locale. Ecco il report da recuperare.';
+  }
+  if (body.model === 'budget-test') content = 'ACTION: plan\nPARAMS: {"steps":["Leggere le fonti"]}';
   if (body.model === 'agent-test')
     content =
       actions === 0
@@ -80,7 +102,9 @@ const server = http.createServer(async (req, res) => {
   res.end(
     JSON.stringify({
       choices: [{ message: { content } }],
-      usage: { total_tokens: 120, prompt_tokens: 80, completion_tokens: 40 }
+      usage: body.model === 'budget-test'
+        ? { total_tokens: 1100, prompt_tokens: 1000, completion_tokens: 100 }
+        : { total_tokens: 120, prompt_tokens: 80, completion_tokens: 40 }
     })
   );
 });
@@ -101,9 +125,18 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`chrome-extension://${extensionId}/sidepanel/panel.html`);
   await page.waitForFunction(
-    () => document.querySelector('#footerVersion').textContent === 'v2.2.1'
+    () => document.querySelector('#footerVersion').textContent === 'v2.2.2'
   );
   assert.equal(await page.locator('#setupNotice').isVisible(), true);
+  assert.match(await page.textContent('#modeHint'), /non legge né controlla/);
+  await page.fill('#taskInput', 'Cerca una pagina di prova');
+  await page.click('#btnUseAgent');
+  assert.equal(await page.inputValue('#modeSelect'), 'ask_first');
+  assert.equal(await page.inputValue('#taskInput'), 'Cerca una pagina di prova');
+  assert.match(await page.textContent('#modeHint'), /conferma prima di ogni comando/);
+  assert.equal(requests.length, 0, 'Cambiare modalità non invia richieste');
+  await page.selectOption('#modeSelect', 'chat');
+  await page.fill('#taskInput', '');
   await page.click('#btnSetupProvider');
   assert.equal(await page.locator('#settingsPanel').isVisible(), true);
   await page.locator('#settingsPanel .drawer-close').click();
@@ -210,7 +243,8 @@ try {
           apiEndpoint: base + '/gateway.php',
           model,
           vision: 'off',
-          nativeTools: false
+          nativeTools: false,
+          tokenBudget: model === 'budget-test' ? 1000 : 80000
         });
         const r = await chrome.runtime.sendMessage({
           type: 'START_AGENT',
@@ -242,6 +276,27 @@ try {
   await run('missing-test');
   await finished();
   assert.equal(await target.inputValue('#field'), 'originale');
+  await run('tabs-test');
+  await finished();
+  const tabRequests = requests.filter((r) => r.model === 'tabs-test');
+  assert.equal(tabRequests.length, 4);
+  const lastTabRequest = tabRequests.at(-1).messages.at(-1).content;
+  assert.ok(lastTabRequest.includes('Risultato nella nuova scheda'));
+  assert.ok(lastTabRequest.includes('/detail'));
+  assert.equal(await target.textContent('h1'), 'Pagina locale di test');
+  await run('repair-test');
+  await finished();
+  const repairRequests = requests.filter((r) => r.model === 'repair-test');
+  assert.equal(repairRequests.length, 2);
+  assert.ok(JSON.stringify(repairRequests[1]).includes('Ecco il report da recuperare'));
+  const repairState = (await page.evaluate(() => chrome.runtime.sendMessage({type: 'GET_STATE'}))).state;
+  assert.ok(repairState.messages.some((m) => m.type === 'done' && m.text.includes('Report recuperato')));
+  await run('budget-test');
+  await finished();
+  assert.equal(requests.filter((r) => r.model === 'budget-test').length, 1);
+  const budgetState = (await page.evaluate(() => chrome.runtime.sendMessage({type: 'GET_STATE'}))).state;
+  assert.ok(budgetState.messages.some((m) => m.type === 'error' && m.text.includes('Budget locale') && m.text.includes('Non indica crediti')));
+  assert.ok(!budgetState.messages.some((m) => m.type === 'done'));
   await run('approval-test', 'ask_first');
   await page.waitForSelector('#approvalBar:not(.hidden)', { timeout: 15000 });
   assert.equal(await target.textContent('h1'), 'Pagina locale di test');

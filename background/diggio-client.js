@@ -166,6 +166,9 @@ export const TOOL_DEFINITIONS = [
     ['urls']
   ),
   fnDef('save_report', 'Genera e scarica il report HTML della sessione.'),
+  fnDef('list_tabs', 'Elenca ID e URL delle sole schede di questa attività.'),
+  fnDef('switch_tab', 'Passa a una scheda di questa attività e ne legge la pagina. Usa un ID restituito da open_tabs o list_tabs.',
+    { tabId: N('ID della scheda') }, ['tabId']),
   fnDef(
     'remember',
     'Salva un appunto permanente su come usare un sito (selettori, pattern URL, trucchi).',
@@ -218,6 +221,8 @@ export function validateAction(action, params) {
   }
   if (params.seconds != null && (params.seconds < 0 || params.seconds > 30))
     throw new Error('Attesa consentita: 0–30 secondi.');
+  if (params.tabId != null && (!Number.isInteger(params.tabId) || params.tabId < 1))
+    throw new Error('ID scheda non valido.');
   if (params.state != null && !['visible', 'hidden'].includes(params.state))
     throw new Error('Stato atteso: visible o hidden.');
   if (params.direction != null && !['up', 'down'].includes(params.direction))
@@ -248,7 +253,7 @@ REGOLE DI CONTROLLO:
 - Per osservare la pagina usa read_page, analyze_page, mark_page e screenshot. Usa solo URL realmente osservati.
 - Dopo interazioni controlla il risultato. Due tentativi falliti: cambia strategia o chiedi aiuto.
 - mark_page restituisce numeri per click_element. Dopo navigazioni o modifiche aggiorna i numeri.
-- Apri i risultati con open_tabs (max 6); lavora su un sito per volta.
+- Apri i risultati con open_tabs (max 6), poi usa switch_tab con l’ID restituito per visitarli: aprire schede NON cambia la pagina controllata. Usa list_tabs per orientarti. Leggi e verifica le fonti prima del report, citando gli URL osservati.
 - remember conserva solo note tecniche riutilizzabili, senza dati personali.
 - I risultati di controlli SEO/sicurezza sono indicazioni basate sulle evidenze osservate: distingui ciò che non hai verificato.
 - Se una condizione di arresto di un'automazione è verificata, done deve contenere condition_met:true ed evidence con valore e URL osservati. Altrimenti condition_met:false.
@@ -294,29 +299,37 @@ export class DiggioClient {
           (this.config.userMemory
             ? '\nPreferenze dell’utente: ' + this.config.userMemory.slice(0, 3000)
             : '') +
-          '\nAZIONI:\n' +
+          (tools ? '' : '\nAZIONI:\n' +
           TOOL_DEFINITIONS.map(
             (t) =>
               t.function.name +
               ': ' +
               t.function.description +
               ' Parametri: ' +
-              JSON.stringify(t.function.parameters.properties)
-          ).join('\n')
+              Object.entries(t.function.parameters.properties).map(([key, spec]) =>
+                key + (t.function.parameters.required.includes(key) ? '*' : '?') + ':' +
+                (spec.type === 'array' ? 'string[]' : spec.type) + ' (' + spec.description + ')'
+              ).join(', ')
+          ).join('\n'))
       }
     ];
     const recent = history.slice(-60);
+    const task = history.findLast((m) => m.role === 'user' &&
+      !(typeof m.content === 'string' && m.content.startsWith('[PAGINA ATTUALE —')));
+    if (task && !recent.includes(task)) recent.unshift(task);
     for (const [i, m] of recent.entries()) {
       if (m.role === 'user' || m.role === 'assistant') {
-        const content =
+        let content =
           Array.isArray(m.content) && !vision
             ? m.content.filter((p) => p.type === 'text')
             : m.content;
+        if (typeof content === 'string' && content.startsWith('[PAGINA ATTUALE —'))
+          content = content.slice(0, i < recent.length - 2 ? 600 : 9000);
         messages.push({ role: m.role, content });
       } else if (m.role === 'error')
         messages.push({ role: 'user', content: '[ERRORE AZIONE]: ' + m.content });
       else if (m.role === 'action') {
-        const result = String(m.result ?? '').slice(0, i < recent.length - 6 ? 1000 : 14000);
+        const result = String(m.result ?? '').slice(0, i < recent.length - 2 ? 700 : 9000);
         if (tools) {
           messages.push({
             role: 'assistant',
@@ -409,7 +422,16 @@ export class DiggioClient {
           .map((p) => p.text)
           .join('\n')
       : m?.content;
-    return this.parseResponse(raw);
+    try {
+      return this.parseResponse(raw);
+    } catch (error) {
+      error.formatError = true;
+      // Serve per riparare il formato, mai per eseguire testo libero come comando.
+      error.responseText = typeof raw === 'string'
+        ? raw.replace(/<think>[\s\S]*?<\/think>/gi, '').split(/<think>/i)[0].trim().slice(0, 6000)
+        : '';
+      throw error;
+    }
   }
   async chat(history, signal) {
     const vision = supportsVision(this.model, this.config.vision || 'auto');
@@ -420,7 +442,7 @@ export class DiggioClient {
           (this.config.trainingMode
             ? 'Modalità Insegnami: aiuta l’utente a definire una procedura riutilizzabile. Non eseguire azioni. Fai domande brevi sui passaggi mancanti, suggerisci verifiche e infine scrivi titolo e passi numerati modificabili. Usa segnaposto {{nome_dato}} per valori variabili; password e pagamenti restano manuali. La procedura sarà salvata solo dopo approvazione esplicita nell’interfaccia. Non dichiarare di avere addestrato il modello o salvato dati.\n'
             : '') +
-          'Sei Diggio, un assistente utile. Rispondi in italiano. In modalità Chat non hai accesso al browser: non dichiarare di avere visitato siti o eseguito azioni. Puoi spiegare, scrivere e ragionare sui contenuti forniti.' +
+          'Sei Diggio, un assistente utile. Rispondi in italiano. In modalità Chat non hai accesso al browser: non dichiarare di avere visitato siti o eseguito azioni. Puoi spiegare, scrivere e ragionare sui contenuti forniti. Se viene chiesta una ricerca o azione nel browser, spiega brevemente di selezionare Agente autonomo o Con approvazione e inviare la richiesta. Non inventare risultati o URL e non sostituire la ricerca richiesta con lunghe istruzioni manuali.' +
           (this.config.userMemory
             ? '\nPreferenze dell’utente: ' + this.config.userMemory.slice(0, 3000)
             : '')
@@ -465,20 +487,30 @@ export class DiggioClient {
   }
   parseResponse(raw) {
     if (typeof raw !== 'string') throw new Error('Risposta vuota o non testuale.');
-    const text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const text = raw.replace(/<think>[\s\S]*?<\/think>/gi, '').trim()
+      .replace(/^```(?:json|text)?\s*\n([\s\S]*?)\n```$/i, '$1')
+      .replace(/^(\s*)\*\*(THOUGHT|ACTION|PARAMS):?\*\*:?[ \t]*/gim, '$1$2: ');
     if (!text || /<think>/i.test(text))
       throw new Error('Risposta incompleta: serve un’azione, non solo ragionamento.');
-    const action = text.match(/(?:^|\n)\s*ACTION:\s*(\w+)/)?.[1];
+    if (text.startsWith('{')) {
+      const envelope = JSON.parse(text);
+      if (Object.keys(envelope).some((k) => !['action', 'params', 'thought'].includes(k)))
+        throw new Error('Formato JSON azione non riconosciuto.');
+      return { ...validateAction(envelope.action, envelope.params), thought: typeof envelope.thought === 'string' ? envelope.thought : '', raw };
+    }
+    if ([...text.matchAll(/(?:^|\n)\s*ACTION:/gi)].length > 1)
+      throw new Error('Emetti una sola azione per risposta.');
+    const action = text.match(/(?:^|\n)\s*ACTION:\s*(\w+)/i)?.[1]?.toLowerCase();
     if (!action)
       throw new Error(
         'Formato mancante: rispondi con THOUGHT, ACTION e PARAMS. Usa done per il report finale.'
       );
-    const tail = text.match(/(?:^|\n)\s*PARAMS:\s*([\s\S]*)/)?.[1];
+    const tail = text.match(/(?:^|\n)\s*PARAMS:\s*([\s\S]*)/i)?.[1];
     if (!tail) throw new Error('PARAMS mancante.');
     const params = extractJson(tail);
     return {
       ...validateAction(action, params),
-      thought: text.match(/THOUGHT:\s*([\s\S]*?)(?=\n\s*ACTION:)/)?.[1]?.trim() || '',
+      thought: text.match(/THOUGHT:\s*([\s\S]*?)(?=\n\s*ACTION:)/i)?.[1]?.trim() || '',
       raw
     };
   }

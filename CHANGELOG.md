@@ -1,5 +1,13 @@
 # Modifiche
 
+## 2.2.2 — 16 settembre 2026
+
+- Avviso Chat sempre visibile prima dell’invio e pulsante Usa il browser: seleziona Con approvazione senza inviare la bozza.
+- Risultati aperti con ID espliciti, elenco delle schede dell’attività e cambio della scheda controllata. Letture associate all’URL della fonte.
+- Parser tollerante a etichette Markdown, maiuscole/minuscole e oggetto JSON esplicito; comandi ambigui o incompleti restano rifiutati. Recupero automatico limitato delle risposte fuori formato, senza falso completamento.
+- Contesto più compatto: meno testo ripetuto delle pagine precedenti e descrizioni degli strumenti non duplicate con tool calling nativo.
+- Messaggi e impostazioni distinguono budget locale cumulativo dell’attività, crediti e quote del provider. Una bozza non recuperabile resta indicata come non verificata.
+
 ## 2.2.1 — 16 settembre 2026
 
 - Icona D-128 fornita dall’autore applicata all’estensione, al pannello e alle grafiche pubbliche.

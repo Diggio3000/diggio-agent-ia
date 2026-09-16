@@ -35,7 +35,7 @@
     </nav>
     <div class="connection-strip">
       <span id="statusDot" class="status-dot"></span
-      ><span id="connectionLabel">Configura il tuo modello</span><span id="progressText"></span>
+      ><span id="connectionLabel">Configura il tuo modello</span><span id="progressText" title="Token cumulativi dell’attività, inclusi i contenuti reinviati al modello. Non rappresentano il saldo o la quota residua del provider."></span>
       <button id="btnUsage" class="text-btn" data-drawer="usagePanel">Consumi</button>
     </div>
     <div id="appNotice" class="notice" role="alert" hidden></div>
@@ -237,10 +237,12 @@
           ><small>Non inserire password o informazioni riservate.</small
           ><label for="maxSteps">Massimo passaggi per attività</label
           ><input id="maxSteps" type="number" min="1" max="80" value="40" /><label for="tokenBudget"
-            >Limite token per attività</label
+            >Budget locale attività (token cumulativi)</label
           ><input id="tokenBudget" type="number" min="1000" step="1000" value="80000" /><small
-            >Usa il consumo comunicato dal provider; se assente, resta attivo il limite di
-            passaggi.</small
+            >Somma input e output di ogni richiesta, compresi i contenuti reinviati. È un limite
+            del plugin, distinto dai crediti e dalle quote del provider. Si controlla dopo ogni
+            risposta e può essere superato dall’ultima richiesta. Se il consumo non è disponibile,
+            resta attivo il limite di passaggi.</small
           ><label for="timeoutSeconds">Tempo massimo risposta (secondi)</label
           ><input id="timeoutSeconds" type="number" min="10" max="300" value="120" />
         </div>
@@ -805,7 +807,7 @@
     <p id="questionText" class="question-banner" hidden></p>
     <section class="composer">
       <div class="composer-top">
-        <select id="modeSelect" aria-label="Modalità">
+        <select id="modeSelect" aria-label="Modalità" aria-describedby="modeHint">
           <option value="chat">Chat</option>
           <option value="learn">Insegnami</option>
           <option value="auto">Agente autonomo</option>
@@ -814,8 +816,13 @@
           + Nuova chat
         </button>
       </div>
+      <div class="mode-notice">
+        <span id="modeHint" aria-live="polite">La Chat non legge né controlla il browser.</span>
+        <button id="btnUseAgent" class="text-btn" type="button">Usa il browser</button>
+      </div>
       <textarea
         id="taskInput"
+        aria-describedby="modeHint"
         rows="3"
         placeholder="Scrivi a Diggio…"
         aria-label="Messaggio"

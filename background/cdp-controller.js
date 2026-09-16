@@ -8,6 +8,7 @@ export class CDPController {
   constructor(tabId, signal) {
     this.signal = signal;
     this.tabId = tabId;
+    this.activityTabs = new Set([tabId]);
     this.attached = false;
     // Buffer console e rete — riempiti dagli eventi CDP mentre l'agente è connesso
     this.consoleBuf = [];
@@ -50,6 +51,30 @@ export class CDPController {
       await chrome.debugger.detach({ tabId: this.tabId });
     } catch {}
     this.attached = false;
+  }
+
+  async switchTab(tabId) {
+    this.signal?.throwIfAborted();
+    if (!this.activityTabs.has(tabId)) throw new Error('Scheda non appartenente a questa attività.');
+    const target = await chrome.tabs.get(tabId);
+    if (!/^https?:|^about:blank$/.test(target.url || ''))
+      throw new Error('Questa scheda è protetta dal browser.');
+    const previous = this.tabId;
+    await this.detach();
+    this.tabId = tabId;
+    this.consoleBuf = [];
+    this.networkMap.clear();
+    try {
+      this.signal?.throwIfAborted();
+      await this.attach();
+      this.signal?.throwIfAborted();
+      await chrome.tabs.update(tabId, { active: true });
+    } catch (error) {
+      await this.detach();
+      this.tabId = previous;
+      if (!this.signal?.aborted) await this.attach().catch(() => {});
+      throw error;
+    }
   }
 
   // Registra console e rete dagli eventi CDP (come la tab Console/Network di DevTools)
@@ -486,7 +511,7 @@ export class CDPController {
     const result = await this.cmd('Runtime.evaluate', {
       expression: `(function() {
         // 1. Testo visibile — rimuovi elementi non utili per risparmiare spazio
-        const body = document.body.cloneNode(true);
+        const body = (document.body || document.documentElement).cloneNode(true);
         body.querySelectorAll('script,style,noscript').forEach(e => e.remove());
         body.querySelectorAll('input,textarea,[contenteditable]').forEach(e => e.remove());
         const pageText = body.textContent.replace(/\\s{3,}/g, '\\n\\n').trim().substring(0, 3500);
@@ -507,7 +532,7 @@ export class CDPController {
             return (text ? text + '  →  ' : '') + a.href;
           });
 
-        return pageText +
+        return 'URL: ' + location.href + '\\n' + pageText +
           '\\n\\n=== LINK PAGINA (da sorgente HTML — usa questi URL, non costruirne di nuovi) ===\\n' +
           links.slice(0, 100).join('\\n').substring(0, 10000);
       })()`,

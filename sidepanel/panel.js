@@ -122,6 +122,7 @@ function setRunning(value) {
   $('btnStop').disabled = !value;
   $('btnStart').disabled = value && !awaitingReply;
   $('modeSelect').disabled = value;
+  $('btnUseAgent').disabled = value;
   $('btnClearChat').disabled = value;
 }
 function applyState(next) {
@@ -129,6 +130,7 @@ function applyState(next) {
   currentSession = next.messages || [];
   currentMode = next.mode || currentMode;
   $('modeSelect').value = currentMode;
+  updateModeHint();
   awaitingReply = next.pending?.type === 'question';
   setRunning(!!next.running);
   $('messages').replaceChildren();
@@ -156,7 +158,7 @@ function applyState(next) {
     next.running && next.step
       ? `${next.step}/${next.maxSteps} passi`
       : next.tokens !== undefined && next.tokens !== null
-        ? `${next.tokens.toLocaleString('it-IT')} token`
+        ? `${next.tokens.toLocaleString('it-IT')} token attività`
         : '';
   $('btnStart').textContent = awaitingReply
     ? 'Rispondi'
@@ -183,7 +185,7 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   if (msg.type === 'USAGE_UPDATE') {
     activeState.tokens = msg.tokens;
     $('progressText').textContent =
-      msg.tokens === null ? 'Token non disponibili' : `${msg.tokens.toLocaleString('it-IT')} token`;
+      msg.tokens === null ? 'Token non disponibili' : `${msg.tokens.toLocaleString('it-IT')} token attività`;
   }
   if (msg.type === 'AGENT_STATE') applyState(msg.state);
   if (msg.type === 'AGENT_UPDATE') {
@@ -262,8 +264,23 @@ $('btnClearChat').addEventListener('click', async () => {
   }
 });
 $('btnChat').addEventListener('click', closeDrawers);
+function updateModeHint() {
+  $('modeHint').textContent = {
+    chat: 'La Chat non legge né controlla il browser.',
+    learn: 'Descrivi una procedura; per registrare i clic usa Strumenti → Insegnami.',
+    auto: 'Usa il browser in autonomia; richiede conferma per le azioni sensibili.',
+    ask_first: 'Usa il browser chiedendoti conferma prima di ogni comando.'
+  }[currentMode];
+  $('btnUseAgent').hidden = currentMode !== 'chat';
+}
+$('btnUseAgent').addEventListener('click', () => {
+  $('modeSelect').value = 'ask_first';
+  $('modeSelect').dispatchEvent(new Event('change'));
+  $('taskInput').focus();
+});
 $('modeSelect').addEventListener('change', () => {
   currentMode = $('modeSelect').value;
+  updateModeHint();
   $('btnStart').textContent = ['chat', 'learn'].includes(currentMode) ? 'Invia' : 'Avvia attività';
   $('taskInput').placeholder = ['chat', 'learn'].includes(currentMode)
     ? 'Scrivi a Diggio…'

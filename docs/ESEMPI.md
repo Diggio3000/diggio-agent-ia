@@ -10,6 +10,14 @@ Modalità **Chat**:
 
 La Chat non legge il browser. Allega o incolla il materiale che vuoi discutere.
 
+## Cercare sul web e confrontare le fonti
+
+Seleziona **Agente autonomo** o **Con approvazione**; in Chat puoi usare il pulsante **Usa il browser** e poi inviare:
+
+> Cerca su Google un asilo nido a Gallicano nel Lazio. Visita le fonti utili e riporta nome, indirizzo, contatto e link. Distingui strutture nel comune e nei dintorni; segnala i dati non verificabili. Non contattare le strutture.
+
+Aprire un risultato in una nuova scheda non ne legge automaticamente il contenuto: l’agente dispone di un comando per passarvi e verificarlo. Se compare «Budget locale dell’attività raggiunto», non significa che siano finiti i crediti del servizio. Puoi scrivere «continua dai risultati già verificati» o modificare il budget nelle impostazioni. Non considerare un’attività interrotta o una bozza non verificata come risultato conclusivo.
+
 ## Leggere e confrontare una pagina
 
 Modalità **Con approvazione**, pagina del prodotto aperta:

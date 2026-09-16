@@ -1,4 +1,6 @@
-# Chrome Web Store — Diggio Agent IA 2.2.1
+# Chrome Web Store — materiali Diggio Agent IA 2.2.2
+
+Materiali aggiornati localmente. L’invio 2.2.1 resta documentato in PUBBLICAZIONE.md; questi file non attestano un nuovo invio allo Store.
 
 ## Descrizione breve
 
@@ -9,7 +11,7 @@ Chat AI e agente browser con il tuo modello: procedure riutilizzabili, consumi e
 Diggio Agent IA ti aiuta a scrivere, leggere pagine e svolgere attività nel browser con il provider AI che scegli tu.
 
 QUATTRO MODI DI LAVORARE
-• Chat: ragiona, scrivi e analizza gli allegati.
+• Chat: ragiona, scrivi e analizza gli allegati, senza leggere o controllare il browser. Un avviso lo chiarisce prima dell’invio; Usa il browser permette di passare alla modalità Con approvazione.
 • Agente autonomo: esegue il compito sulla scheda selezionata; alcune azioni richiedono comunque conferma.
 • Con approvazione: esamina, modifica o salta i comandi prima dell’esecuzione.
 • Insegnami: descrivi una procedura o registra i tuoi clic, controlla la bozza e salvala per riutilizzarla. Si salvano istruzioni, senza addestrare i pesi del modello.

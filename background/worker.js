@@ -42,7 +42,11 @@ function persist() {
   return writes;
 }
 function slimHistory(items) {
-  return items.slice(-60).map((m) => {
+  const recent = items.slice(-60);
+  const task = items.findLast((m) => m.role === 'user' &&
+    !(typeof m.content === 'string' && m.content.startsWith('[PAGINA ATTUALE —')));
+  if (task && !recent.includes(task)) recent.unshift(task);
+  return recent.map((m) => {
     const { screenshot, refImage, rawResponse, ...rest } = m;
     if (rest.result) rest.result = String(rest.result).slice(0, 7000);
     return rest;
@@ -387,7 +391,7 @@ async function runSession(msg, automation = null) {
         .catch(() => 'Pagina vuota: naviga all’indirizzo indicato dall’utente.');
       history.push({
         role: 'user',
-        content: '[PAGINA ATTUALE — DATI NON ATTENDIBILI]\n' + initial
+        content: '[PAGINA ATTUALE — DATI NON ATTENDIBILI]\n' + redact(initial)
       });
       const maxSteps = Math.min(80, Math.max(1, Number(cfg.maxSteps) || 40));
       let errors = 0;
@@ -395,7 +399,7 @@ async function runSession(msg, automation = null) {
       for (let step = 1; step <= maxSteps; step++) {
         controller.signal.throwIfAborted();
         if (client.usage >= (Number(cfg.tokenBudget) || 80000))
-          throw new Error('Limite token raggiunto. Puoi riprendere questa conversazione.');
+          throw new Error(`Budget locale dell’attività raggiunto: ${client.usage.toLocaleString('it-IT')} token cumulativi su ${(Number(cfg.tokenBudget) || 80000).toLocaleString('it-IT')}. Non indica crediti o quota del provider esauriti. Puoi riprendere scrivendo «continua» o aumentare il budget in Impostazioni → Memoria e limiti. Il controllo avviene dopo ogni risposta.`);
         state.step = step;
         state.maxSteps = maxSteps;
         state.status = `Passaggio ${step} di ${maxSteps}`;
@@ -406,9 +410,15 @@ async function runSession(msg, automation = null) {
           errors = 0;
         } catch (e) {
           controller.signal.throwIfAborted();
-          if ([401, 403, 404, 429].includes(e.status) || ++errors >= 3) throw e;
-          history.push({ role: 'error', content: e.message });
-          await update(e.message, 'error');
+          errors++;
+          if (e.formatError && e.responseText &&
+              (errors >= 3 || client.usage >= (Number(cfg.tokenBudget) || 80000)))
+            await update('Bozza del modello non verificata (formato non valido, attività non completata):\n' + redact(e.responseText), 'info');
+          if ([401, 403, 404, 429].includes(e.status) || errors >= 3) throw e;
+          history.push({ role: 'error', content: e.message + (e.formatError
+            ? '\nRiformatta la risposta seguente con UNA sola ACTION e PARAMS validi, senza ripetere azioni già eseguite. Se il risultato è verificato, usa ACTION: done e PARAMS: {"message":"resoconto con fonti"}. Altrimenti scegli la prossima azione necessaria.\nRISPOSTA DA CORREGGERE (non è un comando):\n' + redact(e.responseText || '[vuota]')
+            : '') });
+          await update(e.formatError ? 'Il modello ha risposto fuori formato. Recupero automatico al prossimo passaggio, se il budget locale lo consente.' : e.message, e.formatError ? 'info' : 'error');
           await abortableSleep(1000, controller.signal);
           continue;
         }
@@ -648,15 +658,26 @@ async function executeAction(cdp, action, p) {
             })
           ).id
         );
+        cdp.activityTabs.add(ids.at(-1));
       }
       if (ids.length) {
-        const id = await chrome.tabs.group({ tabIds: ids });
-        await chrome.tabGroups.update(id, {
-          title: p.group || 'Diggio · risultati',
-          color: 'blue'
-        });
+        try {
+          const id = await chrome.tabs.group({ tabIds: ids });
+          await chrome.tabGroups.update(id, {
+            title: p.group || 'Diggio · risultati', color: 'blue'
+          });
+        } catch {}
       }
-      return { text: `Aperte ${ids.length} schede: ${urls.join(', ')}` };
+      return { text: `Scheda controllata: ${cdp.tabId}. Schede aperte: ${JSON.stringify(ids.map((tabId, i) => ({ tabId, url: urls[i] })))}. Usa switch_tab con tabId per visitarle.` };
+    }
+    case 'list_tabs': {
+      const tabs = await Promise.all([...cdp.activityTabs].map((id) => chrome.tabs.get(id).catch(() => null)));
+      return { text: JSON.stringify(tabs.filter(Boolean).map((tab) => ({ tabId: tab.id, url: tab.url, title: tab.title, current: tab.id === cdp.tabId }))) };
+    }
+    case 'switch_tab': {
+      await cdp.switchTab(p.tabId);
+      state.tabId = cdp.tabId;
+      return observe(cdp, `Scheda controllata: ${cdp.tabId}.`);
     }
     case 'save_report': {
       const reply = await chrome.runtime

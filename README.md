@@ -15,6 +15,8 @@ Chat e automazione del browser con il modello che scegli tu.
 
 Tema chiaro/scuro selezionabile, piano di lavoro visibile, conversazioni riprendibili, preferenze personali, strumenti guidati e automazioni programmate.
 
+La Chat mostra subito che non controlla il browser. **Usa il browser** seleziona **Con approvazione**, conserva la bozza e attende il tuo invio. L’agente può aprire risultati e passare esplicitamente fra le schede della propria attività; ogni lettura riporta l’URL della fonte.
+
 ## Installazione locale
 
 1. Apri `chrome://extensions` in Chrome 120 o successivo.
@@ -53,6 +55,8 @@ La registrazione raccoglie clic e indicazioni dei campi, senza registrarne i val
 ## Consumi, limiti e abbonamenti
 
 **Consumi** distingue connessione e modello, su 1, 7 o 30 giorni. Mostra token comunicati dal servizio, copertura parziale, errori e limiti HTTP quando disponibili. Non inventa saldi: “Non disponibile” è diverso da zero. Il budget dell’agente è un limite locale, separato dal limite del provider. Le rilevazioni dei limiti hanno una data e non sono un saldo in tempo reale.
+
+Il budget locale predefinito è **80.000 token per attività**, cumulando input e output di tutte le richieste, incluso il contesto reinviato. Non è la dimensione massima della conversazione né la quota Ollama. Il controllo avviene dopo la risposta e può quindi superare la soglia nell’ultima richiesta. Regolalo in **Impostazioni → Memoria e limiti** oppure riprendi con «continua». Il nuovo avvio ha un nuovo budget; i consumi già registrati restano nel riepilogo. Senza dati token del provider resta attivo il limite dei passaggi.
 
 OpenRouter permette di aggiornare esplicitamente il limite della chiave: non è il saldo complessivo dell’account. Per Ollama, anche quando il modello è cloud, vengono conteggiati i token restituiti e fornito il collegamento alla dashboard; piano, residuo e rinnovo si controllano presso Ollama.
 

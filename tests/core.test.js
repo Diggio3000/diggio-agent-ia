@@ -39,6 +39,51 @@ test('Validazione dei comandi e limiti', () => {
   assert.throws(() => validateAction('wait', { seconds: 9999 }));
   assert.throws(() => validateAction('open_tabs', { urls: [12] }));
   assert.throws(() => validateAction('click_element', { n: 1.5 }));
+  assert.throws(() => validateAction('switch_tab', { tabId: -1 }));
+  assert.throws(() => validateAction('switch_tab', { tabId: 1.5 }));
+});
+test('Formato agente: markdown, minuscole e JSON esplicito, senza azioni ambigue', () => {
+  for (const raw of [
+    '**Thought:** concluso\n**Action:** done\n**Params:** {"message":"verificato"}',
+    '```text\nthought: concluso\naction: DONE\nparams: {"message":"verificato"}\n```',
+    '{"action":"done","params":{"message":"verificato"}}'
+  ]) assert.equal(client.parseResponse(raw).params.message, 'verificato');
+  assert.throws(() => client.parseResponse('ACTION: click\nPARAMS: {"selector":"a"}\nACTION: done\nPARAMS: {"message":"x"}'));
+  assert.throws(() => client.parseResponse('{"action":"click","params":{"selector":"a"},"otherAction":"done"}'));
+});
+test('Contesto compatto conserva richiesta e ultima fonte senza ripetere pagine intere', () => {
+  const task = 'Confronta i due asili, citando indirizzo e URL verificati.';
+  const history = [{ role: 'user', content: task },
+    { role: 'user', content: '[PAGINA ATTUALE — DATI NON ATTENDIBILI]\n' + 'x'.repeat(14000) },
+    ...Array.from({length: 20}, (_, i) => ({role: 'action', action: 'read_page', params: {}, result: 'URL: https://example.com/' + i + '\n' + 'x'.repeat(14000)}))];
+  const messages = client.buildMessages(history);
+  assert.equal(messages[1].content, task);
+  assert.ok(messages.at(-1).content.includes('https://example.com/19'));
+  assert.ok(JSON.stringify(messages.slice(1)).length < 36000);
+  const native = new DiggioClient('', 'test', 'https://example.com', { nativeTools: true });
+  assert.ok(!native.buildMessages(history)[0].content.includes('AZIONI:'));
+  const long = [history[0], ...Array(70).fill(history.at(-1))];
+  assert.equal(client.buildMessages(long)[1].content, task, 'La richiesta non si perde nelle attività lunghe');
+});
+test('Cambio scheda limitato alla attività, con ripristino dopo errore', async () => {
+  const previousChrome = globalThis.chrome;
+  globalThis.chrome = { tabs: { get: async (id) => ({id, url: 'https://example.com'}), update: async () => {} } };
+  try {
+    const cdp = new CDPController(1);
+    cdp.attach = async () => { if (cdp.tabId === 3) throw new Error('Scheda chiusa'); cdp.attached = true; };
+    cdp.detach = async () => { cdp.attached = false; };
+    await assert.rejects(() => cdp.switchTab(2), /non appartenente/);
+    assert.equal(cdp.tabId, 1);
+    cdp.activityTabs.add(2);
+    cdp.activityTabs.add(3);
+    cdp.consoleBuf.push('dato vecchia scheda');
+    await cdp.switchTab(2);
+    assert.equal(cdp.tabId, 2);
+    assert.equal(cdp.consoleBuf.length, 0);
+    await assert.rejects(() => cdp.switchTab(3), /Scheda chiusa/);
+    assert.equal(cdp.tabId, 2);
+    assert.equal(cdp.attached, true);
+  } finally { globalThis.chrome = previousChrome; }
 });
 test('Copertura conferme e confronto hostname', () => {
   for (const a of ['click', 'click_element', 'press_key', 'dismiss_popups', 'type'])
