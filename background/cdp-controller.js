@@ -1,3 +1,5 @@
+import { keyChord } from '../shared/keyboard.js';
+import { pageTarget } from '../shared/page-target.js';
 import { abortableSleep, redact } from '../shared/safety.js';
 // background/cdp-controller.js
 // Controlla il browser tramite Chrome DevTools Protocol
@@ -119,7 +121,10 @@ export class CDPController {
         msg.includes('detached') ||
         msg.includes('no target') ||
         msg.includes('cannot access');
-      if (isDetached) {
+      if (
+        isDetached &&
+        ['Page.getFrameTree', 'Page.getLayoutMetrics', 'Page.captureScreenshot'].includes(method)
+      ) {
         // Riconnessione automatica — accade spesso dopo redirect post-form
         try {
           await this.reattach();
@@ -182,105 +187,86 @@ export class CDPController {
     });
   }
 
-  // Click tramite CSS selector
+  async target(operation, query = {}, value = '') {
+    this.signal?.throwIfAborted();
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: this.tabId },
+      world: 'ISOLATED',
+      func: pageTarget,
+      args: [operation, query, value]
+    });
+    this.signal?.throwIfAborted();
+    const result = results[0]?.result;
+    if (result === undefined)
+      throw new Error('Pagina cambiata durante la lettura: osservala nuovamente.');
+    return result;
+  }
+
+  async locate(query, timeout = 2500) {
+    const deadline = Date.now() + timeout;
+    let previous = null,
+      result;
+    do {
+      result = await this.target('prepare', query);
+      if (result.fatal) throw new Error(result.error);
+      if (
+        result.ok &&
+        previous?.ok &&
+        result.fingerprint === previous.fingerprint &&
+        Math.abs(result.x - previous.x) < 1 &&
+        Math.abs(result.y - previous.y) < 1
+      )
+        return result;
+      previous = result;
+      await this.sleep(100);
+    } while (Date.now() < deadline);
+    throw new Error(result?.error || 'Elemento ancora in movimento: aggiorna la pagina osservata.');
+  }
+
+  async clickTarget(query) {
+    const target = await this.locate(query);
+    const check = await this.target('inspect', query);
+    if (
+      !check.ok ||
+      check.fingerprint !== target.fingerprint ||
+      Math.abs(check.x - target.x) > 1 ||
+      Math.abs(check.y - target.y) > 1
+    )
+      throw new Error('Il bersaglio è cambiato prima del clic. Richiama mark_page.');
+    await this.clickCoords(check.x, check.y);
+    return check.description;
+  }
   async click(selector) {
-    const escaped = JSON.stringify(selector);
-    const result = await this.cmd('Runtime.evaluate', {
-      expression: `
-        (function() {
-          const el = document.querySelector(${escaped});
-          if (!el) return { ok: false, error: 'Elemento non trovato' };
-          const r = el.getBoundingClientRect();
-          if (r.width === 0) return { ok: false, error: 'Elemento non visibile' };
-          return { ok: true, x: r.left + r.width/2, y: r.top + r.height/2 };
-        })()
-      `,
-      returnByValue: true
-    });
-
-    const val = result.result.value;
-    if (!val.ok) throw new Error(val.error);
-
-    await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mousePressed',
-      x: val.x,
-      y: val.y,
-      button: 'left',
-      clickCount: 1
-    });
-    await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mouseReleased',
-      x: val.x,
-      y: val.y,
-      button: 'left',
-      clickCount: 1
-    });
-    await this.sleep(500);
+    return this.clickTarget({ selector });
   }
-
-  // Click per testo visibile
   async clickByText(text) {
-    const escaped = JSON.stringify(text.toLowerCase());
-    const result = await this.cmd('Runtime.evaluate', {
-      expression: `
-        (function() {
-          const all = document.querySelectorAll('a,button,input[type=submit],[role=button],label');
-          for (const el of all) {
-            if (el.textContent.trim().toLowerCase().includes(${escaped})) {
-              const r = el.getBoundingClientRect();
-              if (r.width > 0) return { ok: true, x: r.left + r.width/2, y: r.top + r.height/2 };
-            }
-          }
-          return { ok: false, error: 'Testo non trovato' };
-        })()
-      `,
-      returnByValue: true
-    });
-
-    const val = result.result.value;
-    if (!val.ok) throw new Error(val.error);
-
-    await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mousePressed',
-      x: val.x,
-      y: val.y,
-      button: 'left',
-      clickCount: 1
-    });
-    await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mouseReleased',
-      x: val.x,
-      y: val.y,
-      button: 'left',
-      clickCount: 1
-    });
-    await this.sleep(500);
+    return this.clickTarget({ text });
   }
 
-  // Digita testo in un campo
   async typeText(selector, text) {
-    const target = JSON.stringify(selector);
-    const focused = await this.cmd('Runtime.evaluate', {
-      expression: `(function() {
-        const el = document.querySelector(${target});
-        if (!el || el.disabled || el.readOnly || !el.getClientRects().length) return false;
-        if (el.type === 'password' || /password|cc-number|cc-csc|one-time-code/.test(el.autocomplete || '')) throw new Error('Compila manualmente questo campo riservato.');
-        if (!['INPUT','TEXTAREA'].includes(el.tagName) && !el.isContentEditable) return false;
-        el.focus();
-        if (document.activeElement !== el) return false;
-        if (el.isContentEditable) el.textContent = '';
-        else { const setter = Object.getOwnPropertyDescriptor(el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value').set; setter.call(el, ''); }
-        el.dispatchEvent(new Event('input', {bubbles:true}));
-        return true;
-      })()`,
-      returnByValue: true
-    });
-    if (!focused?.result?.value)
-      throw new Error('Campo assente o non modificabile: nessun testo inserito.');
+    await this.locate({ selector });
+    const result = await this.target('focus', { selector });
+    if (!result.ok) throw new Error(result.error);
+    const focus = await this.target('focused', { selector });
+    if (!focus.ok) throw new Error(focus.error);
     await this.cmd('Input.insertText', { text });
-    await this.cmd('Runtime.evaluate', {
-      expression: `document.querySelector(${target})?.dispatchEvent(new Event('change', {bubbles:true}))`
-    });
+    const verified = await this.target('verifyText', { selector }, text);
+    if (!verified.ok) throw new Error(verified.error);
+  }
+  async selectOption(selector, value) {
+    await this.locate({ selector });
+    const result = await this.target('select', { selector }, value);
+    if (!result.ok) throw new Error(result.error);
+  }
+  async waitFor(selector, state = 'visible', seconds = 10) {
+    const deadline = Date.now() + seconds * 1000;
+    do {
+      const result = await this.target('presence', { selector });
+      if (!result.ok) throw new Error(result.error);
+      if (result.visible === (state === 'visible')) return;
+      await this.sleep(150);
+    } while (Date.now() < deadline);
+    throw new Error('Attesa scaduta: condizione dell’elemento non verificata.');
   }
 
   // Analisi completa dello stato pagina: scroll, paginazione, risultati, filtri
@@ -547,23 +533,17 @@ export class CDPController {
 
   // Click su coordinate fisiche dello schermo (x, y in pixel dalla viewport).
   // Utile per dropdown personalizzati, canvas, elementi non selezionabili via CSS.
-  async clickCoords(x, y) {
-    await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mousePressed',
-      x,
-      y,
-      button: 'left',
-      clickCount: 1
-    });
-    await this.sleep(80);
-    await this.cmd('Input.dispatchMouseEvent', {
-      type: 'mouseReleased',
-      x,
-      y,
-      button: 'left',
-      clickCount: 1
-    });
-    await this.sleep(400);
+  async clickCoords(x, y, count = 1) {
+    const checked = await this.target('coords', { x, y });
+    if (!checked.ok) throw new Error(checked.error);
+    if (![1,2].includes(count)) throw new Error('Numero clic non valido.');
+    for (let clickCount = 1; clickCount <= count; clickCount++) {
+      await this.cmd('Input.dispatchMouseEvent', {type:'mousePressed', x, y, button:'left', clickCount});
+      try { await this.sleep(60); }
+      finally { await chrome.debugger.sendCommand({tabId:this.tabId}, 'Input.dispatchMouseEvent', {type:'mouseReleased',x,y,button:'left',clickCount}).catch(() => {}); }
+      this.signal?.throwIfAborted();
+    }
+    await this.sleep(250);
   }
 
   // Scrolla all'interno di un elemento specifico (es. lista dropdown aperta)
@@ -588,101 +568,24 @@ export class CDPController {
   // ══════════════════════════════════════════════════════════
 
   async markPage() {
-    const result = await this.cmd('Runtime.evaluate', {
-      expression: `(function() {
-        // Rimuovi marks precedenti
-        document.querySelectorAll('.diggio-som').forEach(e => e.remove());
-        window.__diggioMarks = [];
-
-        const els = Array.from(document.querySelectorAll(
-          'a[href],button,input:not([type=hidden]):not([type=password]),select,textarea,' +
-          '[role=button],[role=link],[role=tab],[role=menuitem],[role=combobox],' +
-          '[role=checkbox],[role=radio],[role=option],[onclick],summary'
-        ));
-        const out = [];
-        let n = 0;
-        for (const el of els) {
-          if (/password|cc-number|cc-csc|one-time-code/.test(el.autocomplete || '')) continue;
-          if (n >= 120) break;
-          const r = el.getBoundingClientRect();
-          // Solo elementi visibili nella viewport corrente
-          if (r.width < 5 || r.height < 5) continue;
-          if (r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) continue;
-          const st = getComputedStyle(el);
-          if (st.visibility === 'hidden' || st.display === 'none' || st.opacity === '0') continue;
-
-          n++;
-          window.__diggioMarks[n] = el;
-
-          // Badge numerato (angolo alto-sinistra dell'elemento)
-          const badge = document.createElement('div');
-          badge.className = 'diggio-som';
-          badge.textContent = n;
-          badge.style.cssText = 'position:fixed;left:' + Math.max(0, r.left - 2) + 'px;top:' +
-            Math.max(0, r.top - 14) + 'px;background:#7c3aed;color:#fff;' +
-            'font:bold 11px/14px monospace;padding:0 4px;border-radius:3px;' +
-            'z-index:2147483647;pointer-events:none;box-shadow:0 0 2px #000;';
-          document.body.appendChild(badge);
-
-          // Bordo attorno all'elemento
-          const box = document.createElement('div');
-          box.className = 'diggio-som';
-          box.style.cssText = 'position:fixed;left:' + r.left + 'px;top:' + r.top + 'px;width:' +
-            r.width + 'px;height:' + r.height + 'px;outline:2px solid #7c3aed;' +
-            'z-index:2147483646;pointer-events:none;';
-          document.body.appendChild(box);
-
-          const tag = el.tagName.toLowerCase();
-          const text = ((['INPUT','TEXTAREA'].includes(el.tagName) ? '' : el.textContent) || el.placeholder ||
-                        el.getAttribute('aria-label') || el.title || '')
-                        .trim().replace(/\\s+/g, ' ').substring(0, 60);
-          const href = el.href ? '  →  ' + el.href.substring(0, 90) : '';
-          out.push('[' + n + '] <' + tag + '> ' + text + href);
-        }
-        return out.join('\\n').substring(0, 4200) || 'Nessun elemento interattivo visibile nella viewport';
-      })()`,
-      returnByValue: true
-    });
-    await this.sleep(150); // lascia renderizzare i badge prima dello screenshot
-    return result?.result?.value ?? '';
+    const result = await this.target('mark');
+    await this.sleep(100);
+    return result;
   }
-
-  // Rimuove i badge Set-of-Marks dalla pagina
   async unmarkPage() {
     try {
-      await this.cmd('Runtime.evaluate', {
-        expression: `document.querySelectorAll('.diggio-som').forEach(e => e.remove())`
+      await chrome.scripting.executeScript({
+        target: { tabId: this.tabId },
+        world: 'ISOLATED',
+        func: pageTarget,
+        args: ['unmark']
       });
     } catch {}
   }
-
-  // Clicca l'elemento numerato n dell'ultimo markPage (click fisico al centro)
   async clickMark(n) {
-    const result = await this.cmd('Runtime.evaluate', {
-      expression: `(function() {
-        const el = (window.__diggioMarks || [])[${parseInt(n)}];
-        if (!el) return { ok: false, error: 'Elemento [${parseInt(n)}] non trovato — richiama mark_page (i numeri si azzerano dopo navigazioni/scroll)' };
-        el.scrollIntoView({ block: 'center', behavior: 'instant' });
-        const r = el.getBoundingClientRect();
-        if (r.width === 0) return { ok: false, error: 'Elemento [${parseInt(n)}] non più visibile' };
-        return { ok: true, x: r.left + r.width / 2, y: r.top + r.height / 2,
-                 desc: (['INPUT','TEXTAREA'].includes(el.tagName) ? (el.placeholder || el.type) : el.textContent || '').trim().substring(0, 50) };
-      })()`,
-      returnByValue: true
-    });
-    const val = result?.result?.value;
-    if (!val?.ok) throw new Error(val?.error ?? 'clickMark fallito');
-    await this.unmarkPage(); // togli i badge prima del click (per screenshot puliti dopo)
-    await this.clickCoords(val.x, val.y);
-    return val.desc;
+    await this.unmarkPage();
+    return this.clickTarget({ mark: n });
   }
-
-  // ══════════════════════════════════════════════════════════
-  // ZOOM — screenshot ingrandito di una regione della viewport
-  // Per leggere testo piccolo (prezzi, codici) che nello screenshot
-  // intero risulta illeggibile ai modelli vision.
-  // x, y = angolo alto-sinistra della regione (coordinate viewport)
-  // ══════════════════════════════════════════════════════════
 
   async zoomScreenshot(x = 0, y = 0, width = 600, height = 400) {
     // Converte coordinate viewport → coordinate pagina (il clip CDP usa quelle)
@@ -786,46 +689,64 @@ export class CDPController {
     return out.substring(0, 3200);
   }
 
-  // Preme un tasto della tastiera (Enter, Escape, frecce, ecc.)
+  async readAccessibility() {
+    await this.cmd('Accessibility.enable');
+    const { nodes = [] } = await this.cmd('Accessibility.getFullAXTree');
+    const protectedIds = new Set(
+      nodes
+        .filter((n) => n.properties?.some((p) => p.name === 'protected' && p.value?.value))
+        .map((n) => n.nodeId)
+    );
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const n of nodes)
+        if (protectedIds.has(n.parentId) && !protectedIds.has(n.nodeId)) {
+          protectedIds.add(n.nodeId);
+          changed = true;
+        }
+    }
+    return (
+      nodes
+        .filter(
+          (n) => !n.ignored && !protectedIds.has(n.nodeId) && (n.name?.value || n.value?.value)
+        )
+        .slice(0, 160)
+        .map(
+          (n) =>
+            `${n.role?.value || 'elemento'}: ${String(n.name?.value || '').slice(0, 180)}${n.value?.value ? ' · ' + String(n.value.value).slice(0, 180) : ''}`
+        )
+        .join('\n')
+        .slice(0, 12000) ||
+      'Nessun contenuto accessibile disponibile: usa lo screenshot o verifica il supporto screen reader.'
+    );
+  }
+  async readEditor() {
+    const result = await this.target('editor');
+    if (!result.ok) throw new Error(result.error);
+    return result;
+  }
+  async insertText(target, text) {
+    const result = await this.target('checkEditor', { target });
+    if (!result.ok) throw new Error(result.error);
+    await this.cmd('Input.insertText', { text });
+    await this.sleep(100);
+  }
   async pressKey(name) {
-    const KEYS = {
-      enter: { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
-      tab: { key: 'Tab', code: 'Tab', keyCode: 9 },
-      escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
-      esc: { key: 'Escape', code: 'Escape', keyCode: 27 },
-      backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
-      delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
-      space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
-      arrowdown: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
-      arrowup: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
-      arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
-      arrowright: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
-      pagedown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
-      pageup: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
-      home: { key: 'Home', code: 'Home', keyCode: 36 },
-      end: { key: 'End', code: 'End', keyCode: 35 }
-    };
-    const k = KEYS[(name ?? '').toLowerCase().replace(/[\s_-]/g, '')];
-    if (!k)
-      throw new Error(
-        `Tasto non supportato: "${name}" — usa: Enter, Tab, Escape, Space, Backspace, Delete, ArrowDown/Up/Left/Right, PageDown/Up, Home, End`
-      );
-    await this.cmd('Input.dispatchKeyEvent', {
-      type: 'rawKeyDown',
-      windowsVirtualKeyCode: k.keyCode,
-      nativeVirtualKeyCode: k.keyCode,
-      key: k.key,
-      code: k.code
-    });
-    if (k.text) await this.cmd('Input.dispatchKeyEvent', { type: 'char', text: k.text });
-    await this.cmd('Input.dispatchKeyEvent', {
-      type: 'keyUp',
-      windowsVirtualKeyCode: k.keyCode,
-      nativeVirtualKeyCode: k.keyCode,
-      key: k.key,
-      code: k.code
-    });
-    await this.sleep(300);
+    const { text, ...key } = keyChord(name);
+    const guard = await this.target('keyGuard', {key:key.key});
+    if (!guard.ok) throw new Error(guard.error);
+    await this.cmd('Input.dispatchKeyEvent', { type: 'rawKeyDown', ...key });
+    try {
+      if (text)
+        await this.cmd('Input.dispatchKeyEvent', { type: 'char', text, modifiers: key.modifiers });
+    } finally {
+      // Rilascia il tasto anche se Stop arriva dopo keyDown.
+      await chrome.debugger
+        .sendCommand({ tabId: this.tabId }, 'Input.dispatchKeyEvent', { type: 'keyUp', ...key })
+        .catch(() => {});
+    }
+    await this.sleep(150);
   }
 
   // URL corrente
@@ -839,20 +760,17 @@ export class CDPController {
 
   // Screenshot base64
   async screenshot(options = {}) {
-    await this.cmd('Runtime.evaluate', {
-      expression: `document.querySelectorAll('input[type=password],input[autocomplete=cc-number],input[autocomplete=cc-csc],input[autocomplete=one-time-code]').forEach(el => { el.dataset.diggioVisibility = el.style.visibility; el.style.visibility = 'hidden'; })`
-    });
+    await this.target('mask');
     try {
-      const result = await this.cmd('Page.captureScreenshot', {
-        format: 'jpeg',
-        quality: 65,
-        ...options
-      });
-      return result.data;
+      return (await this.cmd('Page.captureScreenshot', { format: 'jpeg', quality: 65, ...options }))
+        .data;
     } finally {
       try {
-        await chrome.debugger.sendCommand({ tabId: this.tabId }, 'Runtime.evaluate', {
-          expression: `document.querySelectorAll('[data-diggio-visibility]').forEach(el => { el.style.visibility = el.dataset.diggioVisibility; delete el.dataset.diggioVisibility; })`
+        await chrome.scripting.executeScript({
+          target: { tabId: this.tabId },
+          world: 'ISOLATED',
+          func: pageTarget,
+          args: ['unmask']
         });
       } catch {}
     }

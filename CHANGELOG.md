@@ -1,5 +1,19 @@
 # Modifiche
 
+## 2.2.0 — 16 settembre 2026
+
+- Procedure Insegnami da chat e registrazione clic, bozze approvate, revisioni e riutilizzo.
+- Controllo browser più robusto: bersagli univoci, Shadow DOM, attese interrompibili, focus verificato, accessibilità, doppio clic e scorciatoie.
+- Strumenti guidati per operare su Documenti, Fogli e Presentazioni attraverso il browser. Nessuna integrazione API Google.
+- Documentazione, esempi, privacy e immagini aggiornati.
+
+## 2.1.0 — 16 settembre 2026
+
+- Consumi per connessione/modello, limiti dichiarati, dashboard e quota chiave OpenRouter.
+- Indicazioni Ollama cloud e distinzione fra dati ignoti e zero.
+- Firma autore e sito ripristinati; configurazione iniziale ben visibile.
+
+
 ## 2.0.0 — revisione locale
 
 - Nuova interfaccia adattabile al pannello, con temi chiaro/scuro persistenti.

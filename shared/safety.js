@@ -4,6 +4,7 @@ export const WRITE_ACTIONS = new Set([
   'click_element',
   'click_coords',
   'type',
+  'insert_text',
   'select_option',
   'submit_form',
   'press_key',

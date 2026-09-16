@@ -6,12 +6,21 @@ import { needsApproval, browserUrl, abortableSleep, redact } from '../shared/saf
 import { validateAutomation, scheduleSpec, calcNextRun } from '../shared/scheduler.js';
 import { DEFAULT_ENDPOINT, DEFAULT_MODEL } from './edition.js';
 import { recordUsage } from './usage-store.js';
+import {
+  getRecording,
+  startRecording,
+  stopRecording,
+  acceptRecordingEvent,
+  saveProcedure,
+  deleteProcedure
+} from './learning-store.js';
 
 let state = { running: false, messages: [], conversationId: null, mode: 'chat', pending: null };
 let history = [],
   controller = null,
   resolver = null;
 let sessionBusy = false;
+let recordingStarting = false;
 let writes = Promise.resolve();
 let autoWrites = Promise.resolve();
 const ready = (async () => {
@@ -82,6 +91,10 @@ async function saveSession() {
 
 chrome.action.onClicked.addListener((tab) => chrome.sidePanel.open({ tabId: tab.id }));
 chrome.runtime.onMessage.addListener((msg, sender, respond) => {
+  if (msg.type === 'RECORD_DEMONSTRATION_EVENT' && sender.id === chrome.runtime.id && sender.tab) {
+    acceptRecordingEvent(msg, sender).then(respond, () => respond({ active: false }));
+    return true;
+  }
   if (
     sender.id !== chrome.runtime.id ||
     (sender.url && !sender.url.startsWith(chrome.runtime.getURL('')))
@@ -90,17 +103,45 @@ chrome.runtime.onMessage.addListener((msg, sender, respond) => {
   (async () => {
     await ready;
     switch (msg.type) {
+      case 'GET_RECORDING':
+        return { recording: await getRecording() };
+      case 'START_RECORDING': {
+        if (state.running || sessionBusy || recordingStarting)
+          throw new Error('Termina l’attività in corso prima di registrare.');
+        recordingStarting = true;
+        try {
+          return { recording: await startRecording(msg.tabId) };
+        } finally {
+          recordingStarting = false;
+        }
+      }
+      case 'STOP_RECORDING':
+        return { recording: await stopRecording() };
+      case 'SAVE_PROCEDURE':
+        return { procedure: await saveProcedure(msg.procedure) };
+      case 'DELETE_PROCEDURE':
+        await deleteProcedure(msg.id);
+        return { ok: true };
       case 'RECORD_USAGE':
         await recordUsage(msg.config, msg.report);
         return { ok: true };
       case 'GET_STATE':
         return { state: { ...state, running: state.running || sessionBusy } };
       case 'START_AGENT': {
-        if (state.running || sessionBusy) throw new Error('C’è già un’attività in corso.');
+        if (state.running || sessionBusy || recordingStarting)
+          throw new Error('C’è già un’attività in corso.');
         if (!String(msg.task || '').trim()) throw new Error('Scrivi un messaggio.');
         // Reserve synchronously before any settings or tab lookup.
         state.running = true;
         sessionBusy = true;
+        try {
+          if ((await getRecording())?.active)
+            throw new Error('Termina la registrazione prima di usare la chat o l’agente.');
+        } catch (e) {
+          state.running = false;
+          sessionBusy = false;
+          throw e;
+        }
         runSession(msg).catch(async (e) => {
           state.running = false;
           sessionBusy = false;
@@ -284,6 +325,7 @@ async function runSession(msg, automation = null) {
     cfg.apiEndpoint = chatEndpoint(cfg.apiEndpoint || DEFAULT_ENDPOINT, cfg.protocol);
     cfg.model = cfg.model || DEFAULT_MODEL;
     state.mode = msg.mode || 'chat';
+    cfg.trainingMode = state.mode === 'learn';
     state.step = 0;
     state.tokens = null;
     state.usageReported = false;
@@ -317,7 +359,7 @@ async function runSession(msg, automation = null) {
           '. Segnala condition_met ed evidence nella conclusione. Se non verificabile, non dichiararla raggiunta.'
       });
     await snapshot();
-    if (state.mode === 'chat') {
+    if (['chat', 'learn'].includes(state.mode)) {
       state.status = 'Sto preparando la risposta';
       await snapshot();
       const answer = await client.chat(history, controller.signal);
@@ -404,8 +446,8 @@ async function runSession(msg, automation = null) {
             'La stessa azione è fallita due volte. Attività fermata: correggi il compito o il selettore e riprendi.'
           );
         await update(
-          action === 'type'
-            ? `Compilo ${params.selector} (contenuto omesso)`
+          ['type', 'insert_text'].includes(action)
+            ? 'Inserimento testo (contenuto omesso)'
             : `${action} · ${JSON.stringify(params)}`,
           'action'
         );
@@ -416,10 +458,9 @@ async function runSession(msg, automation = null) {
           history.push({
             role: 'action',
             action,
-            params:
-              action === 'type'
-                ? { selector: params.selector, text: '[contenuto omesso]' }
-                : params,
+            params: ['type', 'insert_text'].includes(action)
+              ? { ...params, text: '[contenuto omesso]' }
+              : params,
             result: redact(result.text),
             screenshot: result.screenshot
           });
@@ -482,6 +523,19 @@ async function observe(cdp, text) {
 }
 async function executeAction(cdp, action, p) {
   switch (action) {
+    case 'read_accessibility':
+      return { text: await cdp.readAccessibility() };
+    case 'read_editor':
+      return { text: JSON.stringify(await cdp.readEditor()) };
+    case 'insert_text':
+      await cdp.insertText(p.target, p.text);
+      return observe(
+        cdp,
+        'Testo inviato all’editor attivo. Verifica contenuto e salvataggio nella pagina.'
+      );
+    case 'wait_for':
+      await cdp.waitFor(p.selector, p.state || 'visible', p.seconds ?? 10);
+      return { text: 'Condizione dell’elemento verificata.' };
     case 'plan': {
       if (!p.steps.length || p.steps.length > 8)
         throw new Error('Il piano deve contenere da 1 a 8 passaggi.');
@@ -514,7 +568,7 @@ async function executeAction(cdp, action, p) {
       await cdp.clickMark(p.n);
       return observe(cdp, 'Elemento selezionato. Aggiorna i numeri prima del prossimo click.');
     case 'click_coords':
-      await cdp.clickCoords(p.x, p.y);
+      await cdp.clickCoords(p.x, p.y, p.count || 1);
       return observe(cdp, 'Click eseguito.');
     case 'type':
       await cdp.typeText(p.selector, p.text);
@@ -523,11 +577,7 @@ async function executeAction(cdp, action, p) {
       await cdp.pressKey(p.key);
       return observe(cdp, 'Tasto premuto.');
     case 'select_option': {
-      const r = await cdp.cmd('Runtime.evaluate', {
-        expression: `(()=>{const el=document.querySelector(${JSON.stringify(p.selector)});if(!el || el.tagName!=='SELECT')throw new Error('Select non trovato');const value=${JSON.stringify(p.value)};const opt=[...el.options].find(o=>o.value===value||o.text===value);if(!opt)throw new Error('Opzione non trovata');el.value=opt.value;el.dispatchEvent(new Event('input',{bubbles:true}));el.dispatchEvent(new Event('change',{bubbles:true}));return true;})()`,
-        returnByValue: true
-      });
-      if (!r.result?.value) throw new Error('Selezione non riuscita');
+      await cdp.selectOption(p.selector, p.value);
       return observe(cdp, 'Opzione selezionata.');
     }
     case 'submit_form': {
@@ -696,7 +746,7 @@ async function handleAlarm(alarm) {
     await chrome.alarms.create(alarm.name, { when });
     await updateAuto(id, { nextRun: new Date(when).toISOString() });
   }
-  if (state.running || sessionBusy) {
+  if (state.running || sessionBusy || recordingStarting || (await getRecording())?.active) {
     await chrome.alarms.create('retry_' + id, { delayInMinutes: 5 });
     const periodic = await chrome.alarms.get('automation_' + id);
     if (periodic) await updateAuto(id, { nextRun: new Date(periodic.scheduledTime).toISOString() });
@@ -708,7 +758,7 @@ async function handleAlarm(alarm) {
   if (next) await updateAuto(id, { nextRun: new Date(next.scheduledTime).toISOString() });
 }
 async function runAutomation(a) {
-  if (state.running || sessionBusy) throw new Error('Agente occupato.');
+  if (state.running || sessionBusy || recordingStarting) throw new Error('Agente occupato.');
   if (a.maxRuns > 0 && (a.runsCount || 0) >= a.maxRuns) {
     await updateAuto(a.id, { active: false });
     await clearAlarms(a.id);
@@ -720,6 +770,8 @@ async function runAutomation(a) {
     previousHistory = history;
   let tab;
   try {
+    if ((await getRecording())?.active)
+      throw new Error('Registrazione in corso: automazione sospesa.');
     await saveSession();
     state = {
       running: true,

@@ -11,6 +11,7 @@ import {
 import { DiggioClient } from '../background/diggio-client.js';
 import { esc, renderText, csvCell } from '../shared/render.js';
 import { initializeUsagePanel } from './usage-panel.js';
+import { initializeLearning } from './learning-panel.js';
 
 const $ = (id) => document.getElementById(id);
 let agentRunning = false,
@@ -24,6 +25,7 @@ let currentMode = 'chat',
   currentProvider = 'openai',
   settings = {};
 const DRAWERS = [
+  'learningPanel',
   'usagePanel',
   'settingsPanel',
   'tabsPanel',
@@ -158,12 +160,12 @@ function applyState(next) {
         : '';
   $('btnStart').textContent = awaitingReply
     ? 'Rispondi'
-    : currentMode === 'chat'
+    : ['chat', 'learn'].includes(currentMode)
       ? 'Invia'
       : 'Avvia attività';
   $('taskInput').placeholder = awaitingReply
     ? next.pending.question
-    : currentMode === 'chat'
+    : ['chat', 'learn'].includes(currentMode)
       ? 'Scrivi a Diggio…'
       : 'Descrivi cosa vuoi fare nel browser…';
   $('approvalBar').classList.toggle('hidden', next.pending?.type !== 'approval');
@@ -262,9 +264,10 @@ $('btnClearChat').addEventListener('click', async () => {
 $('btnChat').addEventListener('click', closeDrawers);
 $('modeSelect').addEventListener('change', () => {
   currentMode = $('modeSelect').value;
-  $('btnStart').textContent = currentMode === 'chat' ? 'Invia' : 'Avvia attività';
-  $('taskInput').placeholder =
-    currentMode === 'chat' ? 'Scrivi a Diggio…' : 'Descrivi cosa vuoi fare nel browser…';
+  $('btnStart').textContent = ['chat', 'learn'].includes(currentMode) ? 'Invia' : 'Avvia attività';
+  $('taskInput').placeholder = ['chat', 'learn'].includes(currentMode)
+    ? 'Scrivi a Diggio…'
+    : 'Descrivi cosa vuoi fare nel browser…';
 });
 $('btnSettings').addEventListener('click', () => toggleDrawer('settingsPanel'));
 $('btnSetupProvider').addEventListener('click', () => {
@@ -600,6 +603,7 @@ for (const b of document.querySelectorAll('[data-export]'))
   });
 for (const b of document.querySelectorAll('[data-prompt]'))
   b.addEventListener('click', () => {
+    closeDrawers();
     $('taskInput').value = b.dataset.prompt;
     if (b.dataset.agent) {
       currentMode = 'ask_first';
@@ -642,6 +646,28 @@ async function initialize() {
   applyState((await rpc({ type: 'GET_STATE' })).state);
 }
 initialize().catch(showError);
+initializeLearning({
+  rpc,
+  open: () => {
+    if ($('learningPanel').classList.contains('hidden')) toggleDrawer('learningPanel');
+  },
+  close: closeDrawers,
+  lastAnswer: () => currentSession.filter((m) => m.type === 'done').at(-1)?.text || '',
+  teachChat: async () => {
+    applyState((await rpc({ type: 'NEW_CONVERSATION', mode: 'learn' })).state);
+    $('taskInput').value = 'Voglio insegnarti questa procedura: ';
+    $('taskInput').focus();
+  },
+  useProcedure: async (procedure, mode) => {
+    if (agentRunning) throw new Error('Termina l’attività in corso prima di usare una procedura.');
+    currentMode = mode;
+    $('modeSelect').value = mode;
+    $('modeSelect').dispatchEvent(new Event('change'));
+    $('taskInput').value =
+      `Esegui questa procedura approvata, adattandola alla pagina osservata. Chiedimi i valori dei segnaposto {{...}} mancanti; non inventarli. Verifica l’esito di ogni passaggio.\nTitolo: ${procedure.name}\nSito di riferimento: ${procedure.origin || 'da scegliere'}\n${procedure.instructions}`;
+    $('taskInput').focus();
+  }
+});
 
 // ── Riassunto pagina ──────────────────────────────────────────
 $('btnSummary').addEventListener('click', () => {

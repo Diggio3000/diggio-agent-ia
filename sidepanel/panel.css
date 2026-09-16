@@ -609,6 +609,42 @@ th {
 #usagePanel h3 {
   margin: 22px 0 8px;
 }
+.recording-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 14px 8px;
+  padding: 8px;
+  border: 1px solid var(--error);
+  border-radius: 8px;
+  color: var(--error);
+  font-size: 11px;
+}
+.recording-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+#learningPanel p {
+  margin: 10px 0;
+}
+#learningPanel h3 {
+  margin: 20px 0 8px;
+}
+#procedureInstructions {
+  min-height: 180px;
+  flex-shrink: 0;
+}
+.procedure-card {
+  padding: 12px;
+  margin: 12px 0;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow-wrap: anywhere;
+}
+.procedure-card small {
+  display: block;
+  color: var(--muted);
+}
 #footerVersion {
   margin-left: auto;
   font-family: ui-monospace, monospace;

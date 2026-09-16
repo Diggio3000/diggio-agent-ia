@@ -19,6 +19,30 @@ const N = (d) => ({ type: 'number', description: d });
 
 export const TOOL_DEFINITIONS = [
   fnDef(
+    'read_accessibility',
+    'Legge nomi, ruoli e stati accessibili della pagina, utile per editor e menu.'
+  ),
+  fnDef(
+    'read_editor',
+    'Legge l’editor di testo attualmente a fuoco e restituisce il token target necessario a insert_text. Supporta shadow DOM e iframe della stessa origine.'
+  ),
+  fnDef(
+    'insert_text',
+    'Inserisce testo nel punto corrente senza svuotare il campo. Prima usa read_editor; il focus deve restare sullo stesso editor. Verifica poi il risultato.',
+    { target: S('Token target ricevuto da read_editor'), text: S('Testo da inserire') },
+    ['target', 'text']
+  ),
+  fnDef(
+    'wait_for',
+    'Attende che un elemento appaia o scompaia; preferiscilo alle pause fisse.',
+    {
+      selector: S('Selettore CSS, anche host >>> elemento per shadow DOM aperto'),
+      state: S('visible oppure hidden'),
+      seconds: N('Timeout massimo 30 secondi')
+    },
+    ['selector']
+  ),
+  fnDef(
     'plan',
     'Mostra o aggiorna il piano prima di un’attività complessa.',
     {
@@ -101,8 +125,8 @@ export const TOOL_DEFINITIONS = [
   ),
   fnDef(
     'click_coords',
-    'Click fisico su coordinate schermo in pixel.',
-    { x: N('X in pixel'), y: N('Y in pixel') },
+    'Click fisico su coordinate della viewport in pixel. count=2 per entrare in modifica in una cella o casella di testo.',
+    { x: N('X in pixel'), y: N('Y in pixel'), count:N('1 per clic, 2 per doppio clic') },
     ['x', 'y']
   ),
   fnDef(
@@ -113,7 +137,7 @@ export const TOOL_DEFINITIONS = [
   ),
   fnDef(
     'press_key',
-    'Preme un tasto: Enter, Tab, Escape, Space, Backspace, Delete, ArrowDown/Up/Left/Right, PageDown/Up, Home, End.',
+    'Preme un tasto o una combinazione: Enter, Tab, F2, Ctrl+Home, Ctrl+Shift+ArrowRight, Alt+/, Ctrl+b. Usa Cmd su macOS.',
     { key: S('Nome del tasto') },
     ['key']
   ),
@@ -194,10 +218,13 @@ export function validateAction(action, params) {
   }
   if (params.seconds != null && (params.seconds < 0 || params.seconds > 30))
     throw new Error('Attesa consentita: 0–30 secondi.');
+  if (params.state != null && !['visible', 'hidden'].includes(params.state))
+    throw new Error('Stato atteso: visible o hidden.');
   if (params.direction != null && !['up', 'down'].includes(params.direction))
     throw new Error('Direzione: up o down.');
   if (params.n != null && (!Number.isInteger(params.n) || params.n < 1 || params.n > 120))
     throw new Error('Numero elemento non valido.');
+  if (params.count != null && ![1,2].includes(params.count)) throw new Error('Numero clic consentito: 1 o 2.');
   for (const k of ['x', 'y', 'width', 'height', 'amount'])
     if (params[k] != null && (params[k] < 0 || params[k] > 10000))
       throw new Error(`Valore fuori limite: ${k}`);
@@ -225,6 +252,9 @@ REGOLE DI CONTROLLO:
 - remember conserva solo note tecniche riutilizzabili, senza dati personali.
 - I risultati di controlli SEO/sicurezza sono indicazioni basate sulle evidenze osservate: distingui ciò che non hai verificato.
 - Se una condizione di arresto di un'automazione è verificata, done deve contenere condition_met:true ed evidence con valore e URL osservati. Altrimenti condition_met:false.
+- Usa i selettori o numeri restituiti da mark_page; i numeri scadono e vanno aggiornati se la pagina cambia. I selettori supportano shadow DOM aperto con host >>> elemento. Se un bersaglio è ambiguo, coperto o cambiato, osserva nuovamente: non forzare il clic. Usa wait_for per elementi dinamici. Verifica il risultato dopo ogni azione prima di proseguire; un clic riuscito non prova che il compito sia concluso.
+- Per editor canvas e Google Documenti/Fogli/Presentazioni usa schermata, read_accessibility, menu e scorciatoie press_key (es. Ctrl+Home, Ctrl+Shift+ArrowRight, Alt+/). Per creare file usa navigate verso https://docs.new, https://sheet.new o https://deck.new soltanto se richiesto. Non usare API Google, chiamate HTTP o funzioni interne non documentate degli editor.
+- In Google Workspace, Alt+/ apre la ricerca dei comandi: osserva il menu prima di scegliere. read_editor legge solo il controllo a fuoco, non necessariamente tutto il file. insert_text richiede il target attuale e non svuota il campo; seleziona prima soltanto il testo da sostituire. In Fogli verifica indirizzo cella e formula, e usa Tab/Enter/F2 quando coerente con lo stato osservato; non assumere che testo con tabulazioni venga distribuito in celle. In Presentazioni verifica diapositiva e casella selezionate. Non usare Ctrl+A su un intero file per una modifica locale. Dopo ogni inserimento controlla screenshot, testo accessibile e stato di salvataggio. Se i contenuti canvas non sono leggibili proponi il supporto screen reader (Ctrl+Alt+Z su Windows), senza attivarlo alla cieca perché la scorciatoia è un interruttore. Login, CAPTCHA e permessi restano all’utente.
 `;
 
 export class DiggioClient {
@@ -387,6 +417,9 @@ export class DiggioClient {
       {
         role: 'system',
         content:
+          (this.config.trainingMode
+            ? 'Modalità Insegnami: aiuta l’utente a definire una procedura riutilizzabile. Non eseguire azioni. Fai domande brevi sui passaggi mancanti, suggerisci verifiche e infine scrivi titolo e passi numerati modificabili. Usa segnaposto {{nome_dato}} per valori variabili; password e pagamenti restano manuali. La procedura sarà salvata solo dopo approvazione esplicita nell’interfaccia. Non dichiarare di avere addestrato il modello o salvato dati.\n'
+            : '') +
           'Sei Diggio, un assistente utile. Rispondi in italiano. In modalità Chat non hai accesso al browser: non dichiarare di avere visitato siti o eseguito azioni. Puoi spiegare, scrivere e ragionare sui contenuti forniti.' +
           (this.config.userMemory
             ? '\nPreferenze dell’utente: ' + this.config.userMemory.slice(0, 3000)

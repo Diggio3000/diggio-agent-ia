@@ -39,6 +39,10 @@
       <button id="btnUsage" class="text-btn" data-drawer="usagePanel">Consumi</button>
     </div>
     <div id="appNotice" class="notice" role="alert" hidden></div>
+    <div id="recordingBanner" class="recording-banner" hidden>
+      <span id="recordingSummary">Registrazione in corso</span
+      ><button id="btnStopRecordingQuick" class="btn-secondary">Termina</button>
+    </div>
     <section id="setupNotice" class="setup-notice" aria-label="Prima configurazione">
       <strong>Configura un provider e un modello per iniziare</strong>
       <p>
@@ -81,7 +85,7 @@
     </div>
     <div id="guidePanel" class="panel-drawer hidden">
       <div class="drawer-header">Come usare Diggio</div>
-      <h2>Una chat, tre modi di lavorare.</h2>
+      <h2>Una chat, quattro modi di lavorare.</h2>
       <p>
         <strong>Chat</strong>: scrivi, ragiona e analizza gli allegati. Il browser non viene
         controllato.
@@ -95,12 +99,15 @@
         eseguirlo. Puoi saltarlo o interrompere l’attività.
       </p>
       <h3>Collega il tuo modello</h3>
+      <p><strong>Insegnami</strong>: descrivi una procedura in chat oppure registra i tuoi clic da Strumenti. Controlla i passaggi e approva il salvataggio; puoi riusarli e correggerli. Questa funzione salva istruzioni, senza addestrare i pesi del modello.</p>
       <p>
         Apri Impostazioni, scegli il provider oppure Endpoint custom. Inserisci l’indirizzo
         dell’API, l’eventuale chiave e il modello. Carica l’elenco o scrivi il nome manualmente. Per
         i modelli personalizzati puoi dichiarare il supporto immagini.
       </p>
       <h3>Conversazioni e memoria</h3>
+      <p><strong>Consumi</strong> mostra i token ricevuti dal provider e gli eventuali limiti comunicati. I valori non disponibili non sono zero. Il saldo e il piano di abbonamento si verificano nella dashboard del provider.</p>
+      <p><strong>Documenti, Fogli e Presentazioni Google</strong>: avvia un esempio dagli Strumenti. L’agente usa la pagina, i menu e la tastiera della sessione aperta, senza collegamenti API Google. Controlla il risultato dopo ogni modifica: gli editor canvas possono rendere alcune operazioni non leggibili o non eseguibili.</p>
       <p>
         Le conversazioni vengono salvate sul dispositivo. Riprendile dalla Cronologia. “Nuova chat”
         separa il contesto. Le preferenze personali si gestiscono nelle Impostazioni; le note dei
@@ -378,6 +385,51 @@
       <div id="templateList" class="template-list"></div>
     </div>
     <div id="toolsPanel" class="panel-drawer tools-panel hidden">
+      <button id="btnLearning" class="btn-primary" data-drawer="learningPanel">
+        Insegnami · Procedure e dimostrazioni
+      </button>
+      <div class="tool-section">
+        <div class="tool-section-title">Google Workspace nel browser</div>
+        <p>
+          Usa Documenti, Fogli e Presentazioni nella scheda aperta, attraverso schermata, menu e
+          tastiera. Accedi al tuo account Google nel browser. La riuscita dipende dall’editor e dal
+          modello scelto: verifica sempre il risultato.
+        </p>
+        <div class="tool-row">
+          <button
+            id="btnGoogleDocs"
+            class="btn-secondary"
+            data-agent="1"
+            data-prompt="Crea un nuovo Documento Google tramite https://docs.new usando soltanto l’interfaccia del browser. Prima concordiamo struttura e contenuto; poi inseriscili e verifica formattazione e salvataggio. Contenuto desiderato: "
+          >
+            Nuovo documento
+          </button>
+          <button
+            id="btnGoogleSheets"
+            class="btn-secondary"
+            data-agent="1"
+            data-prompt="Crea un nuovo Foglio Google tramite https://sheet.new usando soltanto schermata e tastiera. Prima concordiamo colonne, dati e formule; verifica intervalli e risultati senza sovrascrivere celle non richieste. Dati da organizzare: "
+          >
+            Nuovo foglio
+          </button>
+          <button
+            id="btnGoogleSlides"
+            class="btn-secondary"
+            data-agent="1"
+            data-prompt="Crea una presentazione Google tramite https://deck.new usando soltanto l’interfaccia del browser. Prima concordiamo una scaletta; poi crea le slide, inserisci i testi nelle caselle corrette e verifica leggibilità e salvataggio. Argomento e pubblico: "
+          >
+            Nuove slide
+          </button>
+        </div>
+        <button
+          id="btnGoogleEdit"
+          class="btn-secondary"
+          data-agent="1"
+          data-prompt="Aiutami sul file Google aperto nella scheda selezionata. Usa schermata, accessibilità, menu e tastiera; non usare API Google. Prima osserva il file e identifica la zona interessata, poi proponi le modifiche e verifica il risultato. La modifica richiesta è: "
+        >
+          Lavora sul file aperto
+        </button>
+      </div>
       <div class="quick-tools">
         <button id="btnSummary" class="btn-secondary">Riassumi pagina</button
         ><button id="btnTranslate" class="btn-secondary">Traduci</button
@@ -647,6 +699,66 @@
       <summary id="planSummary">Piano</summary>
       <ol id="planList"></ol>
     </details>
+    <div id="learningPanel" class="panel-drawer hidden">
+      <div class="drawer-header">Insegnami</div>
+      <p>
+        Crea procedure riutilizzabili, senza riaddestrare il modello. Ogni bozza va esaminata e
+        salvata da te.
+      </p>
+      <div class="tool-row">
+        <button id="btnTeachChat" class="btn-primary">Insegna in chat</button
+        ><button id="btnUseChatDraft" class="btn-secondary">Usa ultima risposta</button>
+      </div>
+      <details class="settings-details">
+        <summary>Registra una dimostrazione</summary>
+        <p>
+          Scegli una scheda e mostra i passaggi. Clic e campi diventano una bozza; i valori digitati
+          e selezionati non vengono registrati. Password e campi riservati restano manuali.
+        </p>
+        <label for="recordingTab">Scheda da registrare</label
+        ><select id="recordingTab"></select>
+        <div class="tool-row">
+          <button id="btnRefreshRecordingTabs" class="btn-secondary">Aggiorna schede</button
+          ><button id="btnStartRecording" class="btn-primary">Registra i miei passaggi</button>
+        </div>
+        <p class="privacy-note">
+          Documento principale e Shadow DOM aperto. La registrazione si ferma cambiando sito,
+          chiudendo la scheda o raggiungendo 20 minuti / 100 passaggi. Le azioni che esegui sul sito
+          hanno effetto reale.
+        </p>
+        <button id="btnRecoverRecording" class="btn-secondary">Carica ultima registrazione</button>
+      </details>
+      <h3>Bozza da approvare</h3>
+      <label for="procedureName">Titolo</label
+      ><input id="procedureName" maxlength="100" placeholder="Es. Cerca e confronta un prodotto" />
+      <label for="procedureOrigin">Sito di riferimento (facoltativo)</label
+      ><input id="procedureOrigin" type="url" placeholder="https://esempio.it" />
+      <label for="procedureInstructions">Passaggi e verifiche</label
+      ><textarea
+        id="procedureInstructions"
+        rows="9"
+        maxlength="12000"
+        placeholder="Descrivi i passaggi e come verificare il risultato. Usa {{nome_dato}} per i valori da chiedere ogni volta."
+      ></textarea>
+      <div class="tool-row">
+        <button id="btnNewProcedure" class="btn-secondary">Nuova bozza</button
+        ><button id="btnSaveProcedure" class="btn-primary">Approva e salva</button>
+      </div>
+      <div id="learningStatus" class="field-status" role="status"></div>
+      <h3>Procedure salvate</h3>
+      <label for="procedureRunMode">Modalità di riutilizzo</label
+      ><select id="procedureRunMode">
+        <option value="ask_first">Con approvazione dei comandi</option>
+        <option value="auto">Agente autonomo</option>
+      </select>
+      <div id="procedureList"></div>
+      <p class="privacy-note">
+        Le procedure restano sul dispositivo. Solo quella che scegli di usare viene inserita nel
+        messaggio al modello; puoi correggerla prima di inviarla. Non salvare segreti nei passaggi.
+        La registrazione conserva etichette, selettori e percorsi delle pagine, da controllare prima
+        del salvataggio.
+      </p>
+    </div>
     <main class="conversation">
       <section id="welcome" class="welcome">
         <div class="welcome-eyebrow">MENO PASSAGGI. PIÙ RISULTATI.</div>
@@ -695,6 +807,7 @@
       <div class="composer-top">
         <select id="modeSelect" aria-label="Modalità">
           <option value="chat">Chat</option>
+          <option value="learn">Insegnami</option>
           <option value="auto">Agente autonomo</option>
           <option value="ask_first">Con approvazione</option></select
         ><button id="btnClearChat" class="text-btn" title="Nuova conversazione">

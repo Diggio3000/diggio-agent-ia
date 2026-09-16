@@ -101,7 +101,7 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`chrome-extension://${extensionId}/sidepanel/panel.html`);
   await page.waitForFunction(
-    () => document.querySelector('#footerVersion').textContent === 'v2.1.0'
+    () => document.querySelector('#footerVersion').textContent === 'v2.2.0'
   );
   assert.equal(await page.locator('#setupNotice').isVisible(), true);
   await page.click('#btnSetupProvider');
