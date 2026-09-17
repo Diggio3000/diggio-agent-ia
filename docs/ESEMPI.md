@@ -16,7 +16,7 @@ Seleziona **Agente autonomo** o **Con approvazione**; in Chat puoi usare il puls
 
 > Cerca su Google un asilo nido a Gallicano nel Lazio. Visita le fonti utili e riporta nome, indirizzo, contatto e link. Distingui strutture nel comune e nei dintorni; segnala i dati non verificabili. Non contattare le strutture.
 
-Aprire un risultato in una nuova scheda non ne legge automaticamente il contenuto: l’agente dispone di un comando per passarvi e verificarlo. Se compare «Budget locale dell’attività raggiunto», non significa che siano finiti i crediti del servizio. Puoi scrivere «continua dai risultati già verificati» o modificare il budget nelle impostazioni. Non considerare un’attività interrotta o una bozza non verificata come risultato conclusivo.
+Aprire un risultato in una nuova scheda non ne legge automaticamente il contenuto: l’agente dispone di un comando per passarvi e verificarlo. Il budget token locale è disattivato per impostazione predefinita. Se hai impostato una soglia e compare «Budget locale impostato raggiunto», non significa che siano finiti i crediti del servizio. Puoi aumentarla oppure svuotare il campo in Impostazioni → Memoria e limiti, salvare e scrivere «continua dai risultati già verificati». Non considerare un’attività interrotta o una bozza non verificata come risultato conclusivo.
 
 ## Leggere e confrontare una pagina
 

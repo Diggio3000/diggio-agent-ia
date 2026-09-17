@@ -72,6 +72,9 @@ const server = http.createServer(async (req, res) => {
       : 'Ho letto la pagina locale. Ecco il report da recuperare.';
   }
   if (body.model === 'budget-test') content = 'ACTION: plan\nPARAMS: {"steps":["Leggere le fonti"]}';
+  if (body.model === 'unlimited-test') content = actions
+    ? 'ACTION: done\nPARAMS: {"message":"Completato oltre 80000 token senza soglia locale."}'
+    : 'ACTION: plan\nPARAMS: {"steps":["Leggere le fonti"]}';
   if (body.model === 'agent-test')
     content =
       actions === 0
@@ -102,7 +105,9 @@ const server = http.createServer(async (req, res) => {
   res.end(
     JSON.stringify({
       choices: [{ message: { content } }],
-      usage: body.model === 'budget-test'
+      usage: body.model === 'unlimited-test'
+        ? { total_tokens: 85000, prompt_tokens: 84000, completion_tokens: 1000 }
+        : body.model === 'budget-test'
         ? { total_tokens: 1100, prompt_tokens: 1000, completion_tokens: 100 }
         : { total_tokens: 120, prompt_tokens: 80, completion_tokens: 40 }
     })
@@ -125,7 +130,7 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`chrome-extension://${extensionId}/sidepanel/panel.html`);
   await page.waitForFunction(
-    () => document.querySelector('#footerVersion').textContent === 'v2.2.2'
+    () => document.querySelector('#footerVersion').textContent === 'v2.2.3'
   );
   assert.equal(await page.locator('#setupNotice').isVisible(), true);
   assert.match(await page.textContent('#modeHint'), /non legge né controlla/);
@@ -172,11 +177,22 @@ try {
     document.querySelector('#modelLoadStatus').textContent.includes('5 modelli')
   );
   await page.selectOption('#modelSelect', 'chat-test');
+  assert.equal(await page.inputValue('#tokenBudget'), '');
   await page.click('#btnSaveSettings');
   await page.waitForFunction(() =>
     document.querySelector('#testResult').textContent.includes('Connessione riuscita')
   );
   assert.equal(await page.locator('#setupNotice').isVisible(), false);
+  assert.equal(await page.evaluate(async () => (await chrome.storage.local.get('tokenBudget')).tokenBudget), 0);
+  await page.locator('#tokenBudget').evaluate((el) => { el.closest('details').open = true; });
+  for (const [value, expected] of [['120000', 120000], ['', 0], ['0', 0]]) {
+    await page.fill('#tokenBudget', value);
+    await page.click('#btnSaveOnly');
+    await page.waitForFunction(async (expected) => (await chrome.storage.local.get('tokenBudget')).tokenBudget === expected, expected);
+  }
+  await page.reload();
+  await page.click('#btnSettings');
+  assert.equal(await page.inputValue('#tokenBudget'), '', 'La soglia cancellata resta disattivata dopo riapertura');
   await page.screenshot({ animations: 'disabled', path: path.join(output, 'custom-settings.png') });
   await page.locator('#settingsPanel .drawer-close').click();
   await page.fill('#taskInput', 'Primo messaggio di prova');
@@ -202,6 +218,7 @@ try {
   assert.match(await page.locator('#usageLocal').textContent(), /240/);
   assert.match(await page.locator('#usageLimits').textContent(), /99 \/ 100/);
   assert.equal(await page.locator('#btnRefreshQuota').isVisible(), false);
+  assert.match(await page.textContent('#usageBudget'), /disattivato/);
   await page.screenshot({ animations: 'disabled', path: path.join(output, 'usage-light.png') });
   await page.click('#btnTheme');
   await page.screenshot({ animations: 'disabled', path: path.join(output, 'usage-dark.png') });
@@ -244,7 +261,7 @@ try {
           model,
           vision: 'off',
           nativeTools: false,
-          tokenBudget: model === 'budget-test' ? 1000 : 80000
+          tokenBudget: model === 'budget-test' ? 1000 : 0
         });
         const r = await chrome.runtime.sendMessage({
           type: 'START_AGENT',
@@ -297,6 +314,13 @@ try {
   const budgetState = (await page.evaluate(() => chrome.runtime.sendMessage({type: 'GET_STATE'}))).state;
   assert.ok(budgetState.messages.some((m) => m.type === 'error' && m.text.includes('Budget locale') && m.text.includes('Non indica crediti')));
   assert.ok(!budgetState.messages.some((m) => m.type === 'done'));
+  await run('unlimited-test');
+  await finished();
+  assert.equal(requests.filter((r) => r.model === 'unlimited-test').length, 2);
+  const unlimitedState = (await page.evaluate(() => chrome.runtime.sendMessage({type: 'GET_STATE'}))).state;
+  assert.equal(unlimitedState.tokens, 170000);
+  assert.ok(unlimitedState.messages.some((m) => m.type === 'done'));
+  assert.ok(!unlimitedState.messages.some((m) => m.type === 'error'));
   await run('approval-test', 'ask_first');
   await page.waitForSelector('#approvalBar:not(.hidden)', { timeout: 15000 });
   assert.equal(await target.textContent('h1'), 'Pagina locale di test');

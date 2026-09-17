@@ -237,9 +237,11 @@
           ><small>Non inserire password o informazioni riservate.</small
           ><label for="maxSteps">Massimo passaggi per attività</label
           ><input id="maxSteps" type="number" min="1" max="80" value="40" /><label for="tokenBudget"
-            >Budget locale attività (token cumulativi)</label
-          ><input id="tokenBudget" type="number" min="1000" step="1000" value="80000" /><small
-            >Somma input e output di ogni richiesta, compresi i contenuti reinviati. È un limite
+            >Budget token facoltativo</label
+          ><input id="tokenBudget" type="number" min="0" step="1" placeholder="Nessun limite" /><small
+            >Disattivato per impostazione predefinita. Lascia vuoto o scrivi 0 per nessun limite;
+            per attivarlo inserisci almeno 1000 e salva. Somma input e output di ogni richiesta,
+            compresi i contenuti reinviati. È un limite
             del plugin, distinto dai crediti e dalle quote del provider. Si controlla dopo ogni
             risposta e può essere superato dall’ultima richiesta. Se il consumo non è disponibile,
             resta attivo il limite di passaggi.</small

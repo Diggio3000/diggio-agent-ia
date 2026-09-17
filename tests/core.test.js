@@ -197,7 +197,7 @@ test('Timeout copre anche il corpo della risposta HTTP', async () => {
 test('Le impostazioni migrano da Sync senza sovrascrivere quelle locali', async () => {
   const old = globalThis.chrome;
   const sync = { apiKey: 'vecchia', model: 'migrato', unrelated: 'conservato' },
-    local = { apiKey: 'nuova' };
+    local = { apiKey: 'nuova', tokenBudget: 80000 };
   const area = (data) => ({
     get: async (keys) => Object.fromEntries(keys.filter((k) => k in data).map((k) => [k, data[k]])),
     set: async (values) => Object.assign(data, values),
@@ -209,6 +209,10 @@ test('Le impostazioni migrano da Sync senza sovrascrivere quelle locali', async 
     const result = await loadSettings();
     assert.equal(result.apiKey, 'nuova');
     assert.equal(result.model, 'migrato');
+    assert.equal(result.tokenBudget, 0);
+    assert.equal(local.optionalTokenBudgetVersion, 1);
+    local.tokenBudget = 80000;
+    assert.equal((await loadSettings()).tokenBudget, 80000, 'La scelta successiva resta valida');
     assert.equal(sync.apiKey, undefined);
     assert.equal(sync.unrelated, 'conservato');
   } finally {

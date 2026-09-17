@@ -166,6 +166,8 @@ export async function requestJson(
   }
 }
 
+import { migrateTokenBudgets } from './budget.js';
+
 let migration;
 const SETTINGS_KEYS = [
   'apiKey',
@@ -205,9 +207,11 @@ export function loadSettings() {
       'authHeader'
     ];
     const old = await chrome.storage.sync.get(keys);
-    const local = await chrome.storage.local.get(SETTINGS_KEYS);
+    const local = await chrome.storage.local.get([...SETTINGS_KEYS, 'optionalTokenBudgetVersion', 'automations']);
     const missing = Object.fromEntries(Object.entries(old).filter(([key]) => !(key in local)));
     if (Object.keys(missing).length) await chrome.storage.local.set(missing);
+    const budgetMigration = migrateTokenBudgets({ ...missing, ...local });
+    if (Object.keys(budgetMigration).length) await chrome.storage.local.set(budgetMigration);
     if (!(local.provider || old.provider) && (local.source || old.source)) {
       const source = local.source || old.source;
       await chrome.storage.local.set({

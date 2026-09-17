@@ -1,6 +1,8 @@
-# Chrome Web Store — materiali Diggio Agent IA 2.2.2
+# Chrome Web Store — materiali Diggio Agent IA 2.2.3
 
 Materiali aggiornati localmente. L’invio 2.2.1 resta documentato in PUBBLICAZIONE.md; questi file non attestano un nuovo invio allo Store.
+
+Novità 2.2.3: budget token facoltativo, disattivato per impostazione predefinita. Campo vuoto o zero per nessuna soglia; consumi sempre consultabili.
 
 ## Descrizione breve
 

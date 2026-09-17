@@ -1,5 +1,12 @@
 # Modifiche
 
+## 2.2.3 — 17 settembre 2026
+
+- Budget token facoltativo, disattivato per impostazione predefinita. Campo vuoto o zero salvati come nessun limite; una soglia positiva resta configurabile.
+- Migrazione una tantum del precedente valore predefinito di 80.000, anche nei profili e nelle automazioni. Soglie personalizzate diverse conservate; 80.000 può essere scelto di nuovo dopo l’aggiornamento.
+- Riepilogo Consumi coerente con la soglia disattivata; conteggi e limite dei passaggi indipendenti.
+- Test di regressione per cancellazione/salvataggio/riapertura e attività completata oltre 80.000 token, con provider simulato.
+
 ## 2.2.2 — 16 settembre 2026
 
 - Avviso Chat sempre visibile prima dell’invio e pulsante Usa il browser: seleziona Con approvazione senza inviare la bozza.

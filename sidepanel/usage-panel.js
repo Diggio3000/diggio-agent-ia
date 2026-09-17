@@ -98,7 +98,10 @@ export function initializeUsagePanel() {
           ? 'Ollama locale non consuma crediti cloud. Se il modello usa il cloud, valgono i limiti del tuo account: residuo, piano e rinnovo si consultano nella dashboard Ollama. Il plugin non li deduce dai token locali.'
           : 'Saldo, quota dell’abbonamento e rinnovo non disponibili in questo connettore. Consulta la dashboard del provider. Gli abbonamenti ChatGPT e Claude non includono le chiamate API di questo plugin.';
     $('usageBudget').textContent =
-      `Soglia locale dell’agente per attività: ${fmt(Number(config.tokenBudget) || 80000)} token, ${fmt(Number(config.maxSteps) || 40)} passaggi. Controllata tra le chiamate; l’ultima risposta può superarla. Non rappresenta un limite di spesa dell’account e non si applica alla modalità Chat.`;
+      (Number(config.tokenBudget) > 0
+        ? `Budget token locale: ${fmt(Number(config.tokenBudget))} per attività. Controllato tra le chiamate; l’ultima risposta può superarlo.`
+        : 'Budget token locale disattivato: nessun limite di token impostato.') +
+      ` Massimo ${fmt(Number(config.maxSteps) || 40)} passaggi per attività. Puoi impostare o rimuovere il budget in Impostazioni → Memoria e limiti. I consumi restano registrati. Il budget non rappresenta il saldo del provider e non si applica alla modalità Chat.`;
   }
   async function refresh() {
     const run = ++generation;

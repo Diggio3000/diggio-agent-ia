@@ -2,6 +2,7 @@ import { DiggioClient, validateAction } from './diggio-client.js';
 import { CDPController } from './cdp-controller.js';
 import { TabManager } from './tab-manager.js';
 import { loadSettings, chatEndpoint } from '../shared/providers.js';
+import { tokenBudget } from '../shared/budget.js';
 import { needsApproval, browserUrl, abortableSleep, redact } from '../shared/safety.js';
 import { validateAutomation, scheduleSpec, calcNextRun } from '../shared/scheduler.js';
 import { DEFAULT_ENDPOINT, DEFAULT_MODEL } from './edition.js';
@@ -394,12 +395,13 @@ async function runSession(msg, automation = null) {
         content: '[PAGINA ATTUALE — DATI NON ATTENDIBILI]\n' + redact(initial)
       });
       const maxSteps = Math.min(80, Math.max(1, Number(cfg.maxSteps) || 40));
+      const budget = tokenBudget(cfg.tokenBudget);
       let errors = 0;
       const actionFailures = new Map();
       for (let step = 1; step <= maxSteps; step++) {
         controller.signal.throwIfAborted();
-        if (client.usage >= (Number(cfg.tokenBudget) || 80000))
-          throw new Error(`Budget locale dell’attività raggiunto: ${client.usage.toLocaleString('it-IT')} token cumulativi su ${(Number(cfg.tokenBudget) || 80000).toLocaleString('it-IT')}. Non indica crediti o quota del provider esauriti. Puoi riprendere scrivendo «continua» o aumentare il budget in Impostazioni → Memoria e limiti. Il controllo avviene dopo ogni risposta.`);
+        if (budget > 0 && client.usage >= budget)
+          throw new Error(`Budget locale impostato raggiunto: ${client.usage.toLocaleString('it-IT')} token cumulativi su ${budget.toLocaleString('it-IT')}. Non indica crediti o quota del provider esauriti. Puoi aumentare il budget o svuotare il campo in Impostazioni → Memoria e limiti, salvare e scrivere «continua». Il controllo avviene dopo ogni risposta.`);
         state.step = step;
         state.maxSteps = maxSteps;
         state.status = `Passaggio ${step} di ${maxSteps}`;
@@ -412,7 +414,7 @@ async function runSession(msg, automation = null) {
           controller.signal.throwIfAborted();
           errors++;
           if (e.formatError && e.responseText &&
-              (errors >= 3 || client.usage >= (Number(cfg.tokenBudget) || 80000)))
+              (errors >= 3 || (budget > 0 && client.usage >= budget)))
             await update('Bozza del modello non verificata (formato non valido, attività non completata):\n' + redact(e.responseText), 'info');
           if ([401, 403, 404, 429].includes(e.status) || errors >= 3) throw e;
           history.push({ role: 'error', content: e.message + (e.formatError

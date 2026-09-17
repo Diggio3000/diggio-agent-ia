@@ -343,7 +343,7 @@ function fillConfig(c) {
   $('nativeToolsCheck').checked = !!c.nativeTools;
   $('timeoutSeconds').value = c.timeoutSeconds || 120;
   $('maxSteps').value = c.maxSteps || 40;
-  $('tokenBudget').value = c.tokenBudget || 80000;
+  $('tokenBudget').value = c.tokenBudget > 0 ? c.tokenBudget : '';
   $('modelSelect').replaceChildren();
   $('modelSelect').classList.add('hidden');
   $('modelLoadStatus').textContent = '';
@@ -408,9 +408,10 @@ async function saveSettings(test) {
     c.timeoutSeconds > 300 ||
     c.maxSteps < 1 ||
     c.maxSteps > 80 ||
-    c.tokenBudget < 1000
+    !Number.isFinite(c.tokenBudget) || c.tokenBudget < 0 ||
+    (c.tokenBudget > 0 && (!Number.isInteger(c.tokenBudget) || c.tokenBudget < 1000))
   )
-    throw new Error('Verifica i limiti: 10–300 secondi, 1–80 passi, almeno 1000 token.');
+    throw new Error('Verifica i limiti: 10–300 secondi, 1–80 passi. Token: vuoto o 0 per nessun limite, oppure un numero intero di almeno 1000.');
   headersFor(c);
   profiles[currentProvider] = c;
   await chrome.storage.local.set({
