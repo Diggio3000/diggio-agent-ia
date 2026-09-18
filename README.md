@@ -17,6 +17,8 @@ Tema chiaro/scuro selezionabile, piano di lavoro visibile, conversazioni riprend
 
 La Chat mostra subito che non controlla il browser. **Usa il browser** seleziona **Con approvazione**, conserva la bozza e attende il tuo invio. L’agente può aprire risultati e passare esplicitamente fra le schede della propria attività; ogni lettura riporta l’URL della fonte.
 
+Riprendendo la conversazione nella stessa sessione di Chrome, l’agente può ritrovare le proprie schede ancora aperte. Dopo un riavvio del browser occorre selezionare nuovamente la pagina: gli ID salvati non vengono usati per controllare altre schede. Il limite di output del provider è distinto dal budget locale; una risposta interrotta viene segnalata come parziale.
+
 ## Installazione locale
 
 1. Apri `chrome://extensions` in Chrome 120 o successivo.
@@ -58,7 +60,9 @@ La registrazione raccoglie clic e indicazioni dei campi, senza registrarne i val
 
 Il budget token locale è **facoltativo e disattivato per impostazione predefinita**. In **Impostazioni → Memoria e limiti**, lascia il campo vuoto oppure scrivi **0** e salva per non applicare una soglia token. Per attivarla, inserisci un intero di almeno 1000. Il vecchio valore predefinito di 80.000 viene rimosso una sola volta durante l’aggiornamento, anche nei profili e nelle automazioni; le soglie precedenti diverse da 80.000 vengono conservate. Dopo l’aggiornamento puoi scegliere anche 80.000 esplicitamente.
 
-Quando attivo, il budget cumula input e output di tutte le richieste, incluso il contesto reinviato. Non è la dimensione massima della conversazione né la quota Ollama. Il controllo avviene dopo la risposta e può superare la soglia nell’ultima richiesta. I consumi restano registrati anche senza budget. Il limite dei passaggi è indipendente; i limiti imposti dal provider restano applicabili.
+Quando attivo, il budget cumula input e output di tutte le richieste, incluso il contesto reinviato. Non è la dimensione massima della conversazione né la quota Ollama. Il controllo avviene dopo la risposta e può superare la soglia nell’ultima richiesta. I consumi restano registrati anche senza budget. I limiti imposti dal provider restano applicabili.
+
+Anche il **limite dei passaggi è facoltativo e disattivato per default**: lascia vuoto o imposta 0, oppure scegli un intero positivo. Il precedente valore predefinito di 40 viene rimosso una sola volta; le soglie personalizzate diverse vengono conservate. Puoi impostare nuovamente 40 dopo l’aggiornamento. Stop, timeout e gestione degli errori restano attivi. Le letture identiche ripetute provocano un invito a cambiare strategia e, se persistono, una richiesta di indicazioni all’utente. L’assenza di una soglia non garantisce il completamento: il modello può incontrare ostacoli o limiti del servizio.
 
 OpenRouter permette di aggiornare esplicitamente il limite della chiave: non è il saldo complessivo dell’account. Per Ollama, anche quando il modello è cloud, vengono conteggiati i token restituiti e fornito il collegamento alla dashboard; piano, residuo e rinnovo si controllano presso Ollama.
 

@@ -2,7 +2,9 @@ import { DiggioClient, validateAction } from './diggio-client.js';
 import { CDPController } from './cdp-controller.js';
 import { TabManager } from './tab-manager.js';
 import { loadSettings, chatEndpoint } from '../shared/providers.js';
-import { tokenBudget } from '../shared/budget.js';
+import { tokenBudget, stepBudget } from '../shared/budget.js';
+import { loadActivityTabs, saveActivityTabs } from './activity-tabs.js';
+import { ProgressGuard } from '../shared/progress.js';
 import { needsApproval, browserUrl, abortableSleep, redact } from '../shared/safety.js';
 import { validateAutomation, scheduleSpec, calcNextRun } from '../shared/scheduler.js';
 import { DEFAULT_ENDPOINT, DEFAULT_MODEL } from './edition.js';
@@ -49,6 +51,8 @@ function slimHistory(items) {
   if (task && !recent.includes(task)) recent.unshift(task);
   return recent.map((m) => {
     const { screenshot, refImage, rawResponse, ...rest } = m;
+    if (['type', 'insert_text'].includes(rest.action) && rest.params)
+      rest.params = { ...rest.params, text: '[contenuto omesso]' };
     if (rest.result) rest.result = String(rest.result).slice(0, 7000);
     return rest;
   });
@@ -382,6 +386,9 @@ async function runSession(msg, automation = null) {
       controller.signal.throwIfAborted();
       state.tabId = target.id;
       cdp = new CDPController(target.id, controller.signal);
+      cdp.activityTabs = await loadActivityTabs(state.conversationId, target.id);
+      await saveActivityTabs(state.conversationId, cdp.activityTabs);
+      controller.signal.throwIfAborted();
       await cdp.attach();
       try {
         const group = await chrome.tabs.group({ tabIds: [target.id] });
@@ -392,19 +399,21 @@ async function runSession(msg, automation = null) {
         .catch(() => 'Pagina vuota: naviga all’indirizzo indicato dall’utente.');
       history.push({
         role: 'user',
-        content: '[PAGINA ATTUALE — DATI NON ATTENDIBILI]\n' + redact(initial)
+        content: '[PAGINA ATTUALE — DATI NON ATTENDIBILI]\n' +
+          `Scheda controllata: ${cdp.tabId}. Per ritrovare le schede già aperte in questa conversazione usa list_tabs.\n` + redact(initial)
       });
-      const maxSteps = Math.min(80, Math.max(1, Number(cfg.maxSteps) || 40));
+      const maxSteps = stepBudget(cfg.maxSteps);
       const budget = tokenBudget(cfg.tokenBudget);
       let errors = 0;
       const actionFailures = new Map();
-      for (let step = 1; step <= maxSteps; step++) {
+      const progress = new ProgressGuard();
+      for (let step = 1; !maxSteps || step <= maxSteps; step++) {
         controller.signal.throwIfAborted();
         if (budget > 0 && client.usage >= budget)
           throw new Error(`Budget locale impostato raggiunto: ${client.usage.toLocaleString('it-IT')} token cumulativi su ${budget.toLocaleString('it-IT')}. Non indica crediti o quota del provider esauriti. Puoi aumentare il budget o svuotare il campo in Impostazioni → Memoria e limiti, salvare e scrivere «continua». Il controllo avviene dopo ogni risposta.`);
         state.step = step;
         state.maxSteps = maxSteps;
-        state.status = `Passaggio ${step} di ${maxSteps}`;
+        state.status = maxSteps ? `Passaggio ${step} di ${maxSteps}` : `Passaggio ${step}`;
         await snapshot();
         let parsed;
         try {
@@ -470,9 +479,7 @@ async function runSession(msg, automation = null) {
           history.push({
             role: 'action',
             action,
-            params: ['type', 'insert_text'].includes(action)
-              ? { ...params, text: '[contenuto omesso]' }
-              : params,
+            params,
             result: redact(result.text),
             screenshot: result.screenshot
           });
@@ -492,6 +499,17 @@ async function runSession(msg, automation = null) {
             });
           }
           await persist();
+          const stalled = progress.record(action, params, result);
+          if (stalled === 'warn') {
+            history.push({ role: 'error', content: 'Le stesse osservazioni si ripetono senza modifiche. Cambia strategia: usa i valori della richiesta, conferma gli inserimenti e verifica dati nuovi. Non ripetere letture o screenshot identici.' });
+            await update('Le letture si stanno ripetendo senza cambiamenti. Chiedo al modello di cambiare strategia.', 'info');
+          } else if (stalled === 'pause') {
+            const answer = await waitInput({ type: 'question', question: 'Sto rileggendo lo stesso stato senza avanzare. Puoi indicare cosa manca o intervenire sulla pagina? Scrivi poi come proseguire, oppure premi Stop.' });
+            controller.signal.throwIfAborted();
+            history.push({ role: 'user', content: answer.reply });
+            await update(answer.reply, 'user');
+            progress.reset();
+          }
         } catch (e) {
           controller.signal.throwIfAborted();
           actionFailures.set(actionKey, (actionFailures.get(actionKey) || 0) + 1);
@@ -661,6 +679,7 @@ async function executeAction(cdp, action, p) {
           ).id
         );
         cdp.activityTabs.add(ids.at(-1));
+        await saveActivityTabs(state.conversationId, cdp.activityTabs);
       }
       if (ids.length) {
         try {

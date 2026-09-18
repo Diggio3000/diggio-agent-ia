@@ -235,8 +235,10 @@
             placeholder="Es. rispondi in modo sintetico; usa prezzi in euro."
           ></textarea
           ><small>Non inserire password o informazioni riservate.</small
-          ><label for="maxSteps">Massimo passaggi per attività</label
-          ><input id="maxSteps" type="number" min="1" max="80" value="40" /><label for="tokenBudget"
+          ><label for="maxSteps">Limite passaggi facoltativo</label
+          ><input id="maxSteps" type="number" min="0" step="1" placeholder="Nessun limite" /><small
+            >Vuoto o 0: l’agente prosegue fino al risultato, a Stop o a un impedimento. Inserisci un intero positivo e salva per impostare un limite.</small
+          ><label for="tokenBudget"
             >Budget token facoltativo</label
           ><input id="tokenBudget" type="number" min="0" step="1" placeholder="Nessun limite" /><small
             >Disattivato per impostazione predefinita. Lascia vuoto o scrivi 0 per nessun limite;
@@ -244,7 +246,7 @@
             compresi i contenuti reinviati. È un limite
             del plugin, distinto dai crediti e dalle quote del provider. Si controlla dopo ogni
             risposta e può essere superato dall’ultima richiesta. Se il consumo non è disponibile,
-            resta attivo il limite di passaggi.</small
+            resta applicabile l’eventuale limite di passaggi impostato.</small
           ><label for="timeoutSeconds">Tempo massimo risposta (secondi)</label
           ><input id="timeoutSeconds" type="number" min="10" max="300" value="120" />
         </div>

@@ -71,7 +71,26 @@ const server = http.createServer(async (req, res) => {
       ? 'ACTION: done\nPARAMS: {"message":"Report recuperato, senza altre azioni."}'
       : 'Ho letto la pagina locale. Ecco il report da recuperare.';
   }
+  if (body.model === 'resume-tabs-test') {
+    const start = body.messages.findLastIndex((m) => m.content === 'Riprendi le schede precedenti');
+    const current = body.messages.slice(start);
+    const count = current.filter((m) => m.role === 'assistant' && String(m.content).startsWith('ACTION:')).length;
+    const observation = current.find((m) => m.role === 'user' && String(m.content).startsWith('[OSSERVAZIONE'))?.content;
+    const found = observation ? JSON.parse(observation.slice(observation.indexOf('\n') + 1)).find((t) => t.url.endsWith('/detail')) : null;
+    content = count === 0 ? 'ACTION: list_tabs\nPARAMS: {}'
+      : count === 1 ? 'ACTION: switch_tab\nPARAMS: ' + JSON.stringify({tabId: found?.tabId || -1})
+      : 'ACTION: done\nPARAMS: {"message":"Scheda precedente recuperata."}';
+  }
   if (body.model === 'budget-test') content = 'ACTION: plan\nPARAMS: {"steps":["Leggere le fonti"]}';
+  if (body.model === 'long-test' || body.model === 'steps-test') {
+    const calls = requests.filter((r) => r.model === body.model).length;
+    content = calls <= 42 ? 'ACTION: plan\nPARAMS: ' + JSON.stringify({steps:['Verifica '+calls]})
+      : 'ACTION: done\nPARAMS: {"message":"Completato oltre 40 passaggi."}';
+  }
+  if (body.model === 'loop-test') content = 'ACTION: get_url\nPARAMS: {}';
+  if (body.model === 'typed-test') content = actions
+    ? 'ACTION: done\nPARAMS: {"message":"Inserimento verificato."}'
+    : 'ACTION: type\nPARAMS: {"selector":"#field","text":"Mese"}';
   if (body.model === 'unlimited-test') content = actions
     ? 'ACTION: done\nPARAMS: {"message":"Completato oltre 80000 token senza soglia locale."}'
     : 'ACTION: plan\nPARAMS: {"steps":["Leggere le fonti"]}';
@@ -130,7 +149,7 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto(`chrome-extension://${extensionId}/sidepanel/panel.html`);
   await page.waitForFunction(
-    () => document.querySelector('#footerVersion').textContent === 'v2.2.3'
+    () => document.querySelector('#footerVersion').textContent === 'v2.2.5'
   );
   assert.equal(await page.locator('#setupNotice').isVisible(), true);
   assert.match(await page.textContent('#modeHint'), /non legge né controlla/);
@@ -261,7 +280,8 @@ try {
           model,
           vision: 'off',
           nativeTools: false,
-          tokenBudget: model === 'budget-test' ? 1000 : 0
+          tokenBudget: model === 'budget-test' ? 1000 : 0,
+          maxSteps: model === 'steps-test' ? 2 : 0
         });
         const r = await chrome.runtime.sendMessage({
           type: 'START_AGENT',
@@ -301,6 +321,17 @@ try {
   assert.ok(lastTabRequest.includes('Risultato nella nuova scheda'));
   assert.ok(lastTabRequest.includes('/detail'));
   assert.equal(await target.textContent('h1'), 'Pagina locale di test');
+  const previousTab = (await page.evaluate(() => chrome.runtime.sendMessage({type: 'GET_STATE'}))).state.tabId;
+  await page.reload();
+  await page.evaluate(async (tabId) => {
+    await chrome.storage.local.set({model: 'resume-tabs-test'});
+    await chrome.runtime.sendMessage({type: 'START_AGENT', task: 'Riprendi le schede precedenti', mode: 'auto', tabId});
+  }, tabId);
+  await finished();
+  const resumed = (await page.evaluate(() => chrome.runtime.sendMessage({type: 'GET_STATE'}))).state;
+  assert.equal(resumed.tabId, previousTab);
+  assert.ok(resumed.messages.some((m) => m.type === 'done' && m.text.includes('Scheda precedente recuperata')));
+  assert.ok(requests.filter((r) => r.model === 'resume-tabs-test').at(-1).messages.at(-1).content.includes('Risultato nella nuova scheda'));
   await run('repair-test');
   await finished();
   const repairRequests = requests.filter((r) => r.model === 'repair-test');
@@ -321,6 +352,26 @@ try {
   assert.equal(unlimitedState.tokens, 170000);
   assert.ok(unlimitedState.messages.some((m) => m.type === 'done'));
   assert.ok(!unlimitedState.messages.some((m) => m.type === 'error'));
+  await run('long-test'); await finished();
+  const longState = (await page.evaluate(() => chrome.runtime.sendMessage({type:'GET_STATE'}))).state;
+  assert.equal(longState.step, 43);
+  assert.ok(longState.messages.some((m) => m.type === 'done'));
+  await run('steps-test'); await finished();
+  const limitedState = (await page.evaluate(() => chrome.runtime.sendMessage({type:'GET_STATE'}))).state;
+  assert.equal(limitedState.step, 2);
+  assert.ok(limitedState.messages.some((m) => m.type === 'error' && m.text.includes('Limite passaggi')));
+  await run('loop-test');
+  await page.waitForSelector('#questionText:not([hidden])');
+  const loopState = (await page.evaluate(() => chrome.runtime.sendMessage({type:'GET_STATE'}))).state;
+  assert.ok(loopState.pending?.question, JSON.stringify({running:loopState.running,messages:loopState.messages.slice(-4)}));
+  assert.match(loopState.pending.question, /senza avanzare/);
+  await page.evaluate(() => chrome.runtime.sendMessage({type:'STOP_AGENT'})); await finished();
+  await run('typed-test'); await finished();
+  assert.equal(await target.inputValue('#field'), 'Mese');
+  assert.ok(requests.filter((r) => r.model === 'typed-test').at(-1).messages.some((m) => m.role === 'assistant' && String(m.content).includes('Mese')));
+  const savedHistory = await page.evaluate(async () => (await chrome.storage.session.get('conversation')).conversation);
+  assert.equal(savedHistory.find((m) => m.action === 'type').params.text, '[contenuto omesso]');
+  await target.reload();
   await run('approval-test', 'ask_first');
   await page.waitForSelector('#approvalBar:not(.hidden)', { timeout: 15000 });
   assert.equal(await target.textContent('h1'), 'Pagina locale di test');

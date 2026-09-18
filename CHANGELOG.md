@@ -1,5 +1,20 @@
 # Modifiche
 
+## 2.2.5 — 18 settembre 2026
+
+- Limite dei passaggi facoltativo e disattivato per default: campo vuoto o zero significa nessun limite. Migrazione una tantum del precedente valore predefinito di 40; soglie personalizzate diverse conservate.
+- Le letture identiche ripetute fanno cambiare strategia e, se persistono, richiedono indicazioni all’utente. Stop, timeout e controlli degli errori restano attivi.
+- Corretto il segnaposto di privacy reinviato al modello: i valori digitati restano disponibili durante l’attività, mentre sono omessi dalla cronologia delle azioni salvata. Il segnaposto non può essere digitato come contenuto.
+- Lettura dello stato visibile di Google Fogli (selezione, barra della formula, editor e salvataggio), senza API Google. I modelli configurati senza visione ricevono istruzioni coerenti con gli strumenti disponibili.
+- Test automatici per attività oltre 40 passaggi, limiti personalizzati, letture ripetute e conservazione temporanea del testo inserito. Il collaudo completo su Google Fogli e Documenti resta necessario prima della pubblicazione.
+
+## 2.2.4 — 18 settembre 2026
+
+- Ripresa delle schede aperte dall’agente nella stessa conversazione e sessione del browser; gli ID non vengono riutilizzati dopo il riavvio di Chrome.
+- Messaggi del provider conservati anche quando l’errore è restituito come stringa.
+- Risposte troncate dal provider riconosciute: nessun comando incompleto eseguito; in Chat il testo disponibile è indicato come parziale.
+- Le risposte di solo ragionamento non vengono mostrate come risultati.
+
 ## 2.2.3 — 17 settembre 2026
 
 - Budget token facoltativo, disattivato per impostazione predefinita. Campo vuoto o zero salvati come nessun limite; una soglia positiva resta configurabile.

@@ -101,7 +101,8 @@ export function initializeUsagePanel() {
       (Number(config.tokenBudget) > 0
         ? `Budget token locale: ${fmt(Number(config.tokenBudget))} per attività. Controllato tra le chiamate; l’ultima risposta può superarlo.`
         : 'Budget token locale disattivato: nessun limite di token impostato.') +
-      ` Massimo ${fmt(Number(config.maxSteps) || 40)} passaggi per attività. Puoi impostare o rimuovere il budget in Impostazioni → Memoria e limiti. I consumi restano registrati. Il budget non rappresenta il saldo del provider e non si applica alla modalità Chat.`;
+      (Number(config.maxSteps) > 0 ? ` Massimo ${fmt(Number(config.maxSteps))} passaggi per attività.` : ' Nessun limite di passaggi impostato.') +
+      ' Puoi impostare o rimuovere i limiti in Impostazioni → Memoria e limiti. I consumi restano registrati. Il budget non rappresenta il saldo del provider e non si applica alla modalità Chat.';
   }
   async function refresh() {
     const run = ++generation;

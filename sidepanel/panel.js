@@ -156,7 +156,7 @@ function applyState(next) {
   }
   $('progressText').textContent =
     next.running && next.step
-      ? `${next.step}/${next.maxSteps} passi`
+      ? (next.maxSteps ? `${next.step}/${next.maxSteps} passi` : `Passaggio ${next.step}`)
       : next.tokens !== undefined && next.tokens !== null
         ? `${next.tokens.toLocaleString('it-IT')} token attività`
         : '';
@@ -342,7 +342,7 @@ function fillConfig(c) {
   $('visionSelect').value = c.vision || 'auto';
   $('nativeToolsCheck').checked = !!c.nativeTools;
   $('timeoutSeconds').value = c.timeoutSeconds || 120;
-  $('maxSteps').value = c.maxSteps || 40;
+  $('maxSteps').value = c.maxSteps > 0 ? c.maxSteps : '';
   $('tokenBudget').value = c.tokenBudget > 0 ? c.tokenBudget : '';
   $('modelSelect').replaceChildren();
   $('modelSelect').classList.add('hidden');
@@ -406,12 +406,11 @@ async function saveSettings(test) {
   if (
     c.timeoutSeconds < 10 ||
     c.timeoutSeconds > 300 ||
-    c.maxSteps < 1 ||
-    c.maxSteps > 80 ||
+    !Number.isSafeInteger(c.maxSteps) || c.maxSteps < 0 ||
     !Number.isFinite(c.tokenBudget) || c.tokenBudget < 0 ||
     (c.tokenBudget > 0 && (!Number.isInteger(c.tokenBudget) || c.tokenBudget < 1000))
   )
-    throw new Error('Verifica i limiti: 10–300 secondi, 1–80 passi. Token: vuoto o 0 per nessun limite, oppure un numero intero di almeno 1000.');
+    throw new Error('Verifica i limiti: 10–300 secondi. Passaggi: vuoto o 0 per nessun limite, oppure un intero positivo. Token: vuoto o 0, oppure un intero di almeno 1000.');
   headersFor(c);
   profiles[currentProvider] = c;
   await chrome.storage.local.set({

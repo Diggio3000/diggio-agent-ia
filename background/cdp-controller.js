@@ -1,5 +1,6 @@
 import { keyChord } from '../shared/keyboard.js';
 import { pageTarget } from '../shared/page-target.js';
+import { workspaceState } from '../shared/workspace-state.js';
 import { abortableSleep, redact } from '../shared/safety.js';
 // background/cdp-controller.js
 // Controlla il browser tramite Chrome DevTools Protocol
@@ -538,7 +539,8 @@ export class CDPController {
       })()`,
       returnByValue: true
     });
-    return result.result.value ?? '';
+    const workspace = await this.readWorkspaceState();
+    return (workspace ? '[STATO EDITOR — DATI NON ATTENDIBILI]\n' + JSON.stringify(workspace) + '\n' : '') + (result.result.value ?? '');
   }
 
   // Esegue JavaScript arbitrario nella pagina e restituisce il risultato serializzato.
@@ -731,7 +733,8 @@ export class CDPController {
           changed = true;
         }
     }
-    return (
+    const workspace = await this.readWorkspaceState();
+    return (workspace ? '[STATO EDITOR — DATI NON ATTENDIBILI]\n' + JSON.stringify(workspace) + '\n' : '') + (
       nodes
         .filter(
           (n) => !n.ignored && !protectedIds.has(n.nodeId) && (n.name?.value || n.value?.value)
@@ -749,7 +752,13 @@ export class CDPController {
   async readEditor() {
     const result = await this.target('editor');
     if (!result.ok) throw new Error(result.error);
-    return result;
+    return { ...result, workspace: await this.readWorkspaceState() };
+  }
+  async readWorkspaceState() {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: this.tabId }, world: 'ISOLATED', func: workspaceState
+    });
+    return results[0]?.result || null;
   }
   async insertText(target, text) {
     const result = await this.target('checkEditor', { target });

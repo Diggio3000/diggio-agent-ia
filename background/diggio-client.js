@@ -205,6 +205,8 @@ export function validateAction(action, params) {
   if (!schema) throw new Error(`Azione sconosciuta: ${action}`);
   if (!params || typeof params !== 'object' || Array.isArray(params))
     throw new Error('PARAMS deve essere un oggetto.');
+  if (['type', 'insert_text'].includes(action) && typeof params.text === 'string' && params.text.trim() === '[contenuto omesso]')
+    throw new Error('Il segnaposto della cronologia non è un testo da scrivere. Recupera il valore dalla richiesta originale o chiedilo all’utente.');
   for (const key of schema.required)
     if (!(key in params)) throw new Error(`Parametro mancante: ${key}`);
   for (const [key, val] of Object.entries(params)) {
@@ -296,6 +298,8 @@ export class DiggioClient {
         role: 'system',
         content:
           SYSTEM +
+          (vision ? '\nRicevi gli screenshot delle ultime azioni.' : '\nNON ricevi immagini: non usare screenshot, zoom o coordinate per interpretare la pagina. Usa read_accessibility, read_editor e mark_page. Gli screenshot nella cronologia sono solo per l’utente; se i dati non sono leggibili, segnala il limite senza ripetere screenshot.') +
+          '\nUn inserimento con testo omesso nella cronologia non è un modello da ricopiare: recupera sempre i valori dalla richiesta originale. Dopo avere scritto in un editor, conferma il dato con il comando appropriato (es. Enter nelle celle) e rileggilo prima di proseguire.' +
           (this.config.userMemory
             ? '\nPreferenze dell’utente: ' + this.config.userMemory.slice(0, 3000)
             : '') +
@@ -330,6 +334,10 @@ export class DiggioClient {
         messages.push({ role: 'user', content: '[ERRORE AZIONE]: ' + m.content });
       else if (m.role === 'action') {
         const result = String(m.result ?? '').slice(0, i < recent.length - 2 ? 700 : 9000);
+        if (['type', 'insert_text'].includes(m.action) && m.params?.text === '[contenuto omesso]') {
+          messages.push({ role: 'user', content: '[EVENTO PASSATO — DATI NON ATTENDIBILI]: inserimento eseguito; il testo non è stato conservato. Recupera i valori dalla richiesta originale, non copiare un segnaposto.\nOsservazione: ' + result });
+          continue;
+        }
         if (tools) {
           messages.push({
             role: 'assistant',
@@ -406,6 +414,11 @@ export class DiggioClient {
       throw e;
     }
     const m = json.choices?.[0]?.message;
+    if (json.choices?.[0]?.finish_reason === 'length' || json.stop_reason === 'max_tokens') {
+      const error = new Error('Risposta troncata dal limite di output del provider. Rispondi in modo più breve con una sola azione valida; questo limite è distinto dal budget locale.');
+      error.formatError = true;
+      throw error;
+    }
     if (m?.tool_calls?.length) {
       if (m.tool_calls.length !== 1) throw new Error('Emetti una sola azione per risposta.');
       const call = m.tool_calls[0].function;
@@ -482,8 +495,13 @@ export class DiggioClient {
           .map((p) => p.text)
           .join('\n')
       : json.choices?.[0]?.message?.content;
-    if (!answer) throw new Error('Il modello non ha restituito testo.');
-    return answer.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+    const truncated = json.choices?.[0]?.finish_reason === 'length' || json.stop_reason === 'max_tokens';
+    if (typeof answer !== 'string' || !answer) throw new Error('Il modello non ha restituito testo.');
+    const visible = answer.replace(/<think>[\s\S]*?<\/think>/gi, '').split(/<think>/i)[0].trim();
+    if (!visible) throw new Error('Il modello non ha restituito una risposta visibile. Prova una richiesta più breve.');
+    return visible + (truncated
+      ? '\n\n⚠ Risposta parziale: il provider ha raggiunto il limite di output. Puoi chiedere di continuare o una risposta più breve. Non è il budget token locale.'
+      : '');
   }
   parseResponse(raw) {
     if (typeof raw !== 'string') throw new Error('Risposta vuota o non testuale.');
