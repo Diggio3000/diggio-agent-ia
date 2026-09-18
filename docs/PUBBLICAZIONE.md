@@ -1,3 +1,22 @@
+# Pubblicazione 2.2.5 — 18 settembre 2026
+
+## Verifiche e limiti
+
+37 test Node superati, suite UI e avanzata superate con provider simulati. Verificati oltre 40 passaggi, soglia personalizzata, letture ripetute e conservazione temporanea del testo digitato. Nel test reale precedente su Google Fogli la tabella e il grafico non sono stati completati; il collaudo completo della 2.2.5 su Fogli e Documenti resta da eseguire. La nuova pubblicazione è stata richiesta esplicitamente dall’autore dopo questa segnalazione.
+
+## Pacchetto
+
+File: diggio-agent-ia-2.2.5.zip
+SHA-256: 3187e1eea791b28b1bf6a30b88694e5ec9925a9c8f9193272e989653ecf194de
+
+Solo runtime, icone, manifest e licenza. Controllo ZIP e controllo dei riferimenti a infrastrutture interne superati.
+
+## Stato
+
+Materiali, descrizione e privacy aggiornati. La dashboard mostra la 2.2.1 pubblicata. Caricamento 2.2.5 in preparazione: lo strumento di upload non consente il percorso locale del progetto; selezione manuale dello ZIP richiesta all’autore. Nessun nuovo invio in revisione ancora confermato.
+
+---
+
 # Pubblicazione 2.2.1 — 16 settembre 2026
 
 ## Stato registrato

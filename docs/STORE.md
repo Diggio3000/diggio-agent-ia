@@ -1,8 +1,8 @@
-# Chrome Web Store — materiali Diggio Agent IA 2.2.3
+# Chrome Web Store — materiali Diggio Agent IA 2.2.5
 
-Materiali aggiornati localmente. L’invio 2.2.1 resta documentato in PUBBLICAZIONE.md; questi file non attestano un nuovo invio allo Store.
+Lo stato effettivo dell’invio e della disponibilità pubblica è documentato in PUBBLICAZIONE.md.
 
-Novità 2.2.3: budget token facoltativo, disattivato per impostazione predefinita. Campo vuoto o zero per nessuna soglia; consumi sempre consultabili.
+Novità 2.2.5: budget token e limite passaggi facoltativi, disattivati per impostazione predefinita; recupero delle schede, gestione delle risposte incomplete e lettura dello stato visibile di Google Fogli migliorati.
 
 ## Descrizione breve
 
@@ -29,6 +29,8 @@ Registra una breve dimostrazione nella scheda scelta oppure costruisci una proce
 
 CONSUMI E ATTIVITÀ
 Consulta i token comunicati dai provider, i limiti disponibili e i collegamenti alle dashboard, anche per Ollama cloud. I dati mancanti sono indicati e i conteggi locali non sono il saldo dell’account. Programma attività con intervallo o giorni/orario, limite di esecuzioni e condizione di arresto. Chrome e il computer devono essere disponibili.
+
+Budget token e limite di passaggi sono facoltativi e disattivati per default. Puoi configurarli in Impostazioni → Memoria e limiti; campo vuoto o zero significa nessuna soglia locale. Restano Stop, timeout e gestione degli errori. Letture identiche ripetute provocano un cambio di strategia e, se persistono, una richiesta di indicazioni.
 
 INTERFACCIA E DATI
 Temi chiaro e scuro, piano di lavoro, cronologia riprendibile, preferenze e report esportabili. Impostazioni e chiavi restano nello storage locale dell’estensione, senza Chrome Sync. I contenuti necessari al compito sono inviati al provider scelto. Non è richiesto un server dello sviluppatore e il codice non include telemetria dello sviluppatore.

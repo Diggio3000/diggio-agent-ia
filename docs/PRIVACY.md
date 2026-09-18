@@ -1,6 +1,6 @@
 # Privacy — Diggio Agent IA
 
-Aggiornamento: 16 settembre 2026 · versione 2.2.1
+Aggiornamento: 18 settembre 2026 · versione 2.2.5
 
 ## Sviluppatore e scopo
 
@@ -13,6 +13,8 @@ Lo storage locale dell’estensione conserva impostazioni, chiavi API, profili d
 Lo storage non è un gestore cifrato di segreti. Proteggi il dispositivo e il profilo Chrome. Le chiavi servono ad autenticare le richieste al servizio configurato; non salvarle nelle istruzioni, nelle preferenze o nelle procedure.
 
 ## Richieste ai servizi
+
+Durante l’attività, i testi inseriti dall’agente restano disponibili in memoria per le richieste successive al modello. Nei parametri delle azioni di inserimento salvate nella cronologia sono sostituiti da un segnaposto. Gli stessi contenuti possono comunque comparire nei messaggi, nelle osservazioni o negli screenshot: questo mascheramento non elimina tutti i dati forniti o letti durante il compito. Gli identificativi delle schede dell’attività sono conservati nello storage di sessione per riprendere la conversazione nello stesso browser.
 
 Messaggi, cronologia pertinente, allegati e osservazioni necessari al compito vengono inviati direttamente al provider AI scelto. Le osservazioni possono comprendere testo, link, screenshot, albero di accessibilità, contenuti dell’editor a fuoco, console e informazioni sulle richieste di rete della scheda. Possono contenere dati personali o riservati presenti nei materiali analizzati.
 
