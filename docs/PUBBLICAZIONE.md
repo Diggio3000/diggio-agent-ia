@@ -13,7 +13,12 @@ Solo runtime, icone, manifest e licenza. Controllo ZIP e controllo dei riferimen
 
 ## Stato
 
-Materiali, descrizione e privacy aggiornati. La dashboard mostra la 2.2.1 pubblicata. Caricamento 2.2.5 in preparazione: lo strumento di upload non consente il percorso locale del progetto; selezione manuale dello ZIP richiesta all’autore. Nessun nuovo invio in revisione ancora confermato.
+- GitHub aggiornato sul ramo master; tag v2.2.5 sul commit dbc0898 (runtime ad742f8).
+- Privacy 2.2.5 pubblicata e verificata online con HTTP 200; commit 28eaefc del repository privacy.
+- ZIP 2.2.5 caricato manualmente dall’autore perché lo strumento di upload non consente il percorso locale. Versione della bozza verificata nella dashboard.
+- Descrizione dello Store aggiornata e salvataggio verificato. Icona e grafiche già presenti nello Store conservate; i cinque screenshot rigenerati della 2.2.5 sono disponibili su GitHub ma non sono stati ricaricati nello Store.
+- Invio per revisione completato il 18 settembre 2026. Stato verificato: **In attesa di revisione**. Pubblicazione automatica dopo approvazione selezionata.
+- La versione pubblica precedente è 2.2.1. L’invio non attesta l’approvazione o la disponibilità pubblica della 2.2.5.
 
 ---
 
